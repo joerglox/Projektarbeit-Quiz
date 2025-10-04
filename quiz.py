@@ -6,6 +6,7 @@ import openai
 import streamlit as st
 from docx import Document
 from io import BytesIO
+from pathlib import Path
 
 # -----------------------------
 # OPENAI API Key
@@ -14,6 +15,13 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
     st.error("Bitte setze deinen OpenAI API Key als Umgebungsvariable OPENAI_API_KEY")
     st.stop()
+
+# -----------------------------
+# Ordner für gespeicherte DOCX
+# -----------------------------
+STORAGE_DIR = Path(".streamlit_data")
+STORAGE_DIR.mkdir(exist_ok=True)
+SAVED_DOCX_PATH = STORAGE_DIR / "saved_projektarbeit.docx"
 
 # -----------------------------
 # DOCX einlesen
@@ -75,7 +83,6 @@ Antwort im JSON-Format mit:
             )
             content = response.choices[0].message.content.strip()
             data = json.loads(content)
-            # Nachbearbeitung: "..." entfernen
             data["question"] = data["question"].replace("...", "").strip()
             data["answer"] = data["answer"].replace("...", "").strip()
             data["choices"] = [c.replace("...", "").strip() for c in data["choices"]]
@@ -88,7 +95,7 @@ Antwort im JSON-Format mit:
 # -----------------------------
 # Quiz generieren
 # -----------------------------
-def generate_quiz(paragraphs, categories, questions_total=5):
+def generate_quiz(paragraphs, categories, questions_total=10):
     quiz = []
     while len(quiz) < questions_total:
         paragraph = random.choice(paragraphs)
@@ -106,20 +113,39 @@ def generate_quiz(paragraphs, categories, questions_total=5):
 # Streamlit App
 # -----------------------------
 def main():
+    st.set_page_config(page_title="Projektarbeit Quiz", page_icon="📘", layout="centered")
     st.title("📘 Projektarbeit Quiz")
-    st.write("Teste dein Fach-, Methoden-, Analyse- und Strategiewissen!")
+    st.markdown("Teste dein Fach-, Methoden-, Analyse- und Strategiewissen!")
 
-    uploaded_file = st.file_uploader("Projektarbeit (DOCX) hochladen", type="docx")
     categories = ["fachwissen","methoden","analyse","kritik","transfer"]
 
+    # -----------------------------
+    # Hochgeladene Datei speichern und wiederverwenden
+    # -----------------------------
+    if "uploaded_docx" not in st.session_state:
+        if SAVED_DOCX_PATH.exists():
+            st.session_state.uploaded_docx = open(SAVED_DOCX_PATH, "rb").read()
+        else:
+            st.session_state.uploaded_docx = None
+
+    uploaded_file = st.file_uploader("Projektarbeit (DOCX) hochladen", type="docx")
     if uploaded_file:
-        paragraphs = load_paragraphs_from_file(BytesIO(uploaded_file.read()))
+        with open(SAVED_DOCX_PATH, "wb") as f:
+            f.write(uploaded_file.read())
+        st.session_state.uploaded_docx = open(SAVED_DOCX_PATH, "rb").read()
+        st.success("Datei hochgeladen und gespeichert!")
+
+    # -----------------------------
+    # Quiz generieren
+    # -----------------------------
+    if st.session_state.uploaded_docx:
+        paragraphs = load_paragraphs_from_file(BytesIO(st.session_state.uploaded_docx))
         if "quiz" not in st.session_state:
             st.session_state.quiz = []
 
         if st.button("🔄 Neues Quiz generieren"):
             st.info("Quiz wird generiert, bitte warten...")
-            quiz = generate_quiz(paragraphs, categories, questions_total=5)
+            quiz = generate_quiz(paragraphs, categories, questions_total=10)
             st.session_state.quiz = quiz
             st.success("Quiz generiert!")
 
@@ -127,6 +153,7 @@ def main():
             quiz = st.session_state.quiz
             score = 0
             for i, q in enumerate(quiz, 1):
+                st.markdown("---")
                 st.subheader(f"Frage {i} ({q['category']})")
                 st.write(q["question"])
                 choice = st.radio("Antwort auswählen:", q["choices"], key=f"q{i}")
@@ -136,7 +163,10 @@ def main():
                         score += 1
                     else:
                         st.error(f"❌ Falsch! Richtige Antwort: {q['answer']}")
-            st.info(f"Dein aktueller Score: {score}/{len(quiz)}")
+                st.progress((i)/len(quiz))
+
+            st.markdown("---")
+            st.metric(label="Gesamt-Score", value=f"{score}/{len(quiz)}")
 
 if __name__ == "__main__":
     main()
