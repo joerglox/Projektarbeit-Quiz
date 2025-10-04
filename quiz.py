@@ -8,7 +8,7 @@ from docx import Document
 from io import BytesIO
 
 # -----------------------------
-# OPENAI API Key
+# OpenAI API Key
 # -----------------------------
 openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
@@ -75,11 +75,10 @@ Antwort im JSON-Format mit:
             )
             content = response.choices[0].message.content.strip()
             data = json.loads(content)
-            # Nachbearbeitung
+            # Nachbearbeitung: "..." entfernen
             data["question"] = data["question"].replace("...", "").strip()
             data["answer"] = data["answer"].replace("...", "").strip()
             data["choices"] = [c.replace("...", "").strip() for c in data["choices"]]
-            random.shuffle(data["choices"])  # zufällige Reihenfolge
             data["category"] = category
             return data
         except Exception:
@@ -91,117 +90,117 @@ Antwort im JSON-Format mit:
 # -----------------------------
 def generate_quiz(paragraphs, categories, questions_total=10):
     quiz = []
+    used_categories = set()
+
     while len(quiz) < questions_total:
-        paragraph = random.choice(paragraphs)
         category = random.choice(categories)
+        paragraph = random.choice(paragraphs)
         parts = split_paragraph(paragraph, max_length=300)
+
         for part in parts:
             q = generate_question_gpt(part, category)
             if q:
                 quiz.append(q)
-            if len(quiz) >= questions_total:
-                break
+                used_categories.add(category)
+                if len(quiz) >= questions_total:
+                    break
+        if len(used_categories) == len(categories) and len(quiz) >= questions_total:
+            break
     return quiz
 
 # -----------------------------
 # Streamlit App
 # -----------------------------
 def main():
-    st.set_page_config(page_title="📘 Projektarbeit Quiz", layout="centered")
+    st.set_page_config(page_title="Projektarbeit Quiz", layout="centered")
 
-    # CSS: neutrales Design (verhindert weißen Text auf Weiß im Dark Mode)
+    # Style für Dark/Light Mode
     st.markdown("""
         <style>
-            body, .stApp {
-                background-color: #f9f9f9 !important;
-                color: #000000 !important;
-            }
-            .stRadio > div {
-                background-color: #ffffff;
-                padding: 10px;
-                border-radius: 10px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            }
-            .question-card {
-                background: white;
-                padding: 20px;
-                border-radius: 15px;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-                margin-bottom: 20px;
-            }
-            .stButton>button {
-                border-radius: 10px;
-                background-color: #2b65ec;
-                color: white;
-                font-weight: 600;
-                padding: 8px 20px;
-            }
+        .main {
+            background-color: var(--background-color);
+            color: var(--text-color);
+            font-family: 'Helvetica Neue', sans-serif;
+        }
+        div[data-testid="stRadio"] > div {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px 16px;
+            border-radius: 10px;
+        }
+        .stButton > button {
+            width: 100%;
+            border-radius: 10px;
+            padding: 10px;
+            color: white;
+            background: linear-gradient(90deg, #3a7bd5, #00d2ff);
+            border: none;
+            font-weight: bold;
+        }
+        .stButton > button:hover {
+            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+        }
+        .question-card {
+            background-color: rgba(240, 240, 240, 0.1);
+            padding: 20px;
+            border-radius: 15px;
+            margin-top: 15px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+        }
         </style>
     """, unsafe_allow_html=True)
 
     st.title("📘 Projektarbeit Quiz")
-    st.caption("Teste dein Fach-, Methoden-, Analyse- und Strategiewissen!")
+    st.write("Teste dein Fach-, Methoden-, Analyse- und Strategiewissen!")
 
-    uploaded_file = st.file_uploader("📄 Projektarbeit (DOCX) hochladen", type="docx")
+    uploaded_file = st.file_uploader("📄 Lade deine Projektarbeit (DOCX)", type="docx")
     categories = ["fachwissen", "methoden", "analyse", "kritik", "transfer"]
 
     if uploaded_file:
         paragraphs = load_paragraphs_from_file(BytesIO(uploaded_file.read()))
         if "quiz" not in st.session_state:
-            st.session_state.quiz = generate_quiz(paragraphs, categories, questions_total=10)
+            st.session_state.quiz = []
+
+        if st.button("🔄 Neues Quiz generieren"):
+            st.info("Quiz wird generiert, bitte warten...")
+            quiz = generate_quiz(paragraphs, categories, questions_total=10)
+            st.session_state.quiz = quiz
             st.session_state.current_index = 0
             st.session_state.score = 0
-            st.session_state.answers = []
+            st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in categories}
+            st.success("✅ Quiz erfolgreich generiert!")
 
-        quiz = st.session_state.quiz
-        current_index = st.session_state.current_index
-        question = quiz[current_index]
-
-        st.markdown(f"#### Frage {current_index+1} von {len(quiz)} ({question['category']})")
-        with st.container():
-            st.markdown(f"<div class='question-card'><b>{question['question']}</b></div>", unsafe_allow_html=True)
-
-            choice = st.radio("Antwort auswählen:", question["choices"], key=f"choice_{current_index}")
+        if st.session_state.get("quiz"):
+            quiz = st.session_state.quiz
+            i = st.session_state.current_index
+            q = quiz[i]
+            st.markdown(f"<div class='question-card'><h4>Frage {i+1} ({q['category'].capitalize()})</h4><p>{q['question']}</p></div>", unsafe_allow_html=True)
+            choice = st.radio("Wähle deine Antwort:", q["choices"], key=f"q{i}")
 
             if st.button("Antwort bestätigen"):
-                if choice == question["answer"]:
+                cat = q["category"]
+                st.session_state.stats[cat]["total"] += 1
+                if choice == q["answer"]:
                     st.success("✅ Richtig!")
                     st.session_state.score += 1
+                    st.session_state.stats[cat]["correct"] += 1
                 else:
-                    st.error(f"❌ Falsch! Richtige Antwort: {question['answer']}")
-                st.session_state.answers.append({"frage": question["question"], "richtig": choice == question["answer"]})
-                time.sleep(0.5)
-                if st.session_state.current_index < len(quiz) - 1:
+                    st.error(f"❌ Falsch! Richtige Antwort: {q['answer']}")
+
+                time.sleep(1)
+                if i + 1 < len(quiz):
                     st.session_state.current_index += 1
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
-                    st.session_state.show_results = True
-                    st.experimental_rerun()
+                    st.balloons()
+                    st.subheader("🏁 Quiz abgeschlossen!")
+                    st.write(f"Dein Gesamtscore: **{st.session_state.score}/{len(quiz)}**")
 
-        # Ergebnisse am Ende anzeigen
-        if "show_results" in st.session_state and st.session_state.show_results:
-            st.subheader("📊 Ergebnisse")
-            st.write(f"Du hast **{st.session_state.score} von {len(quiz)}** Fragen richtig beantwortet.")
-
-            # Kategorienaustellung
-            category_scores = {}
-            for a, q in zip(st.session_state.answers, quiz):
-                cat = q["category"]
-                if cat not in category_scores:
-                    category_scores[cat] = [0, 0]
-                category_scores[cat][1] += 1
-                if a["richtig"]:
-                    category_scores[cat][0] += 1
-
-            for cat, (richtig, gesamt) in category_scores.items():
-                st.write(f"**{cat.capitalize()}**: {richtig}/{gesamt}")
-
-            if st.button("🔁 Neues Quiz starten"):
-                for key in ["quiz", "current_index", "score", "answers", "show_results"]:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                st.experimental_rerun()
-
+                    st.markdown("### 📊 Kategorie-Statistik:")
+                    for cat, stats in st.session_state.stats.items():
+                        total = stats["total"]
+                        correct = stats["correct"]
+                        if total > 0:
+                            st.write(f"**{cat.capitalize()}**: {correct}/{total} richtig")
 
 if __name__ == "__main__":
     main()
