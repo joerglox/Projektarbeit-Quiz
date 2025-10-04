@@ -73,6 +73,8 @@ Antwort im JSON-Format mit:
 "answer": "Antwort A",
 "category": "{category}"
 }}
+
+Bitte **mische die Reihenfolge der Antwortmöglichkeiten zufällig**, sodass die richtige Antwort nicht immer an erster Stelle steht.
 """
     for _ in range(retries):
         try:
@@ -83,9 +85,16 @@ Antwort im JSON-Format mit:
             )
             content = response.choices[0].message.content.strip()
             data = json.loads(content)
+            # Nachbearbeitung
             data["question"] = data["question"].replace("...", "").strip()
             data["answer"] = data["answer"].replace("...", "").strip()
             data["choices"] = [c.replace("...", "").strip() for c in data["choices"]]
+
+            # Richtiges Mischen der Choices
+            correct = data["answer"]
+            random.shuffle(data["choices"])
+            data["answer"] = correct
+
             data["category"] = category
             return data
         except Exception:
@@ -120,9 +129,7 @@ def main():
 
     categories = ["fachwissen","methoden","analyse","kritik","transfer"]
 
-    # -----------------------------
     # Hochgeladene Datei speichern und wiederverwenden
-    # -----------------------------
     if "uploaded_docx" not in st.session_state:
         if SAVED_DOCX_PATH.exists():
             st.session_state.uploaded_docx = open(SAVED_DOCX_PATH, "rb").read()
@@ -136,9 +143,7 @@ def main():
         st.session_state.uploaded_docx = open(SAVED_DOCX_PATH, "rb").read()
         st.success("📄 Datei hochgeladen und gespeichert!")
 
-    # -----------------------------
     # Quiz generieren
-    # -----------------------------
     if st.session_state.uploaded_docx:
         paragraphs = load_paragraphs_from_file(BytesIO(st.session_state.uploaded_docx))
         if "quiz" not in st.session_state:
@@ -153,8 +158,6 @@ def main():
         if st.session_state.quiz:
             quiz = st.session_state.quiz
             score = 0
-
-            # Fortschrittsbalken oben
             progress_bar = st.progress(0)
 
             for i, q in enumerate(quiz, 1):
