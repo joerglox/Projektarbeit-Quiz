@@ -116,6 +116,7 @@ def main():
     st.set_page_config(page_title="Projektarbeit Quiz", page_icon="📘", layout="centered")
     st.title("📘 Projektarbeit Quiz")
     st.markdown("Teste dein Fach-, Methoden-, Analyse- und Strategiewissen!")
+    st.markdown("---")
 
     categories = ["fachwissen","methoden","analyse","kritik","transfer"]
 
@@ -133,7 +134,7 @@ def main():
         with open(SAVED_DOCX_PATH, "wb") as f:
             f.write(uploaded_file.read())
         st.session_state.uploaded_docx = open(SAVED_DOCX_PATH, "rb").read()
-        st.success("Datei hochgeladen und gespeichert!")
+        st.success("📄 Datei hochgeladen und gespeichert!")
 
     # -----------------------------
     # Quiz generieren
@@ -144,26 +145,34 @@ def main():
             st.session_state.quiz = []
 
         if st.button("🔄 Neues Quiz generieren"):
-            st.info("Quiz wird generiert, bitte warten...")
+            st.info("⏳ Quiz wird generiert, bitte warten...")
             quiz = generate_quiz(paragraphs, categories, questions_total=10)
             st.session_state.quiz = quiz
-            st.success("Quiz generiert!")
+            st.success("✅ Quiz generiert!")
 
         if st.session_state.quiz:
             quiz = st.session_state.quiz
             score = 0
+
+            # Fortschrittsbalken oben
+            progress_bar = st.progress(0)
+
             for i, q in enumerate(quiz, 1):
-                st.markdown("---")
-                st.subheader(f"Frage {i} ({q['category']})")
-                st.write(q["question"])
-                choice = st.radio("Antwort auswählen:", q["choices"], key=f"q{i}")
-                if st.button(f"Antwort bestätigen {i}", key=f"btn{i}"):
-                    if choice == q["answer"]:
-                        st.success("✅ Richtig!")
-                        score += 1
-                    else:
-                        st.error(f"❌ Falsch! Richtige Antwort: {q['answer']}")
-                st.progress((i)/len(quiz))
+                with st.container():
+                    st.markdown(f"### Frage {i} ({q['category']})")
+                    st.markdown(f"<div style='background-color:#f9f9f9;padding:10px;border-radius:10px'>{q['question']}</div>", unsafe_allow_html=True)
+
+                    choice = st.radio("Antwort auswählen:", q["choices"], key=f"q{i}")
+
+                    if st.button(f"Antwort bestätigen {i}", key=f"btn{i}"):
+                        if choice == q["answer"]:
+                            st.success("✅ Richtig!")
+                            score += 1
+                        else:
+                            st.error(f"❌ Falsch! Richtige Antwort: {q['answer']}")
+
+                    progress_bar.progress(i / len(quiz))
+                    st.markdown("<br>", unsafe_allow_html=True)
 
             st.markdown("---")
             st.metric(label="Gesamt-Score", value=f"{score}/{len(quiz)}")
