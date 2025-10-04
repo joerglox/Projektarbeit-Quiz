@@ -5,7 +5,6 @@ import time
 import openai
 import streamlit as st
 from docx import Document
-from io import BytesIO
 
 # -----------------------------
 # OPENAI API Key
@@ -18,8 +17,8 @@ if not openai.api_key:
 # -----------------------------
 # DOCX einlesen
 # -----------------------------
-def load_paragraphs_from_file(file, min_length=30):
-    doc = Document(file)
+def load_paragraphs_from_file(file_path, min_length=30):
+    doc = Document(file_path)
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     return [p for p in paragraphs if len(p) > min_length]
 
@@ -158,53 +157,60 @@ def main():
     st.title("📘 Projektarbeit Quiz")
     st.write("Teste dein Fach-, Methoden-, Analyse- und Strategiewissen!")
 
-    uploaded_file = st.file_uploader("📄 Projektarbeit (DOCX) hochladen", type="docx")
+    docx_path = "Projektarbeit.docx"
+    if not os.path.exists(docx_path):
+        st.error(f"Projektarbeit nicht gefunden unter {docx_path}!")
+        st.stop()
+
+    paragraphs = load_paragraphs_from_file(docx_path)
     categories = ["methoden", "analyse", "fachwissen", "kritik", "transfer"]
 
-    if uploaded_file:
-        paragraphs = load_paragraphs_from_file(BytesIO(uploaded_file.read()))
-        if "quiz" not in st.session_state:
-            st.session_state.quiz = []
+    if "quiz" not in st.session_state:
+        st.session_state.quiz = []
+        st.session_state.current_index = 0
+        st.session_state.score = 0
+        st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in categories}
 
-        if st.button("🔄 Neues Quiz generieren"):
-            st.info("Quiz wird generiert, bitte warten...")
-            quiz = generate_quiz_per_chapter(paragraphs)
-            st.session_state.quiz = quiz
-            st.session_state.current_index = 0
-            st.session_state.score = 0
-            st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in categories}
-            st.success("✅ Quiz erfolgreich generiert!")
+    if st.button("🔄 Neues Quiz generieren"):
+        st.info("Quiz wird generiert, bitte warten...")
+        quiz = generate_quiz_per_chapter(paragraphs)
+        st.session_state.quiz = quiz
+        st.session_state.current_index = 0
+        st.session_state.score = 0
+        st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in categories}
+        st.success("✅ Quiz erfolgreich generiert!")
 
-        if st.session_state.get("quiz"):
-            quiz = st.session_state.quiz
-            i = st.session_state.current_index
-            q = quiz[i]
-            st.markdown(f"### Frage {i+1} ({q['category'].capitalize()})\n{q['question']}")
-            choice = st.radio("Wähle deine Antwort:", q["choices"], key=f"q{i}")
+    if st.session_state.get("quiz"):
+        quiz = st.session_state.quiz
+        i = st.session_state.current_index
+        q = quiz[i]
 
-            if st.button("Antwort bestätigen"):
-                cat = q["category"]
-                st.session_state.stats[cat]["total"] += 1
-                if choice == q["answer"]:
-                    st.success("✅ Richtig!")
-                    st.session_state.score += 1
-                    st.session_state.stats[cat]["correct"] += 1
-                else:
-                    st.error(f"❌ Falsch! Richtige Antwort: {q['answer']}")
+        st.markdown(f"### Frage {i+1} ({q['category'].capitalize()})\n{q['question']}")
+        choice = st.radio("Wähle deine Antwort:", q["choices"], key=f"q{i}")
 
-                if i + 1 < len(quiz):
-                    st.session_state.current_index += 1
-                    st.experimental_rerun()
-                else:
-                    st.balloons()
-                    st.subheader("🏁 Quiz abgeschlossen!")
-                    st.write(f"Dein Gesamtscore: **{st.session_state.score}/{len(quiz)}**")
-                    st.markdown("### 📊 Kategorie-Statistik:")
-                    for cat, stats in st.session_state.stats.items():
-                        total = stats["total"]
-                        correct = stats["correct"]
-                        if total > 0:
-                            st.write(f"**{cat.capitalize()}**: {correct}/{total} richtig")
+        if st.button("Antwort bestätigen"):
+            cat = q["category"]
+            st.session_state.stats[cat]["total"] += 1
+            if choice == q["answer"]:
+                st.success("✅ Richtig!")
+                st.session_state.score += 1
+                st.session_state.stats[cat]["correct"] += 1
+            else:
+                st.error(f"❌ Falsch! Richtige Antwort: {q['answer']}")
+
+            if i + 1 < len(quiz):
+                st.session_state.current_index += 1
+                st.experimental_rerun()
+            else:
+                st.balloons()
+                st.subheader("🏁 Quiz abgeschlossen!")
+                st.write(f"Dein Gesamtscore: **{st.session_state.score}/{len(quiz)}**")
+                st.markdown("### 📊 Kategorie-Statistik:")
+                for cat, stats in st.session_state.stats.items():
+                    total = stats["total"]
+                    correct = stats["correct"]
+                    if total > 0:
+                        st.write(f"**{cat.capitalize()}**: {correct}/{total} richtig")
 
 if __name__ == "__main__":
     main()
