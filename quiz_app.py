@@ -5,6 +5,7 @@ import time
 import openai
 import streamlit as st
 from docx import Document
+from io import BytesIO
 
 # -----------------------------
 # OPENAI API Key
@@ -17,11 +18,8 @@ if not openai.api_key:
 # -----------------------------
 # DOCX einlesen
 # -----------------------------
-def load_paragraphs(docx_path, min_length=30):
-    if not os.path.exists(docx_path):
-        st.error(f"Datei {docx_path} nicht gefunden!")
-        st.stop()
-    doc = Document(docx_path)
+def load_paragraphs_from_file(file, min_length=30):
+    doc = Document(file)
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     return [p for p in paragraphs if len(p) > min_length]
 
@@ -111,34 +109,34 @@ def main():
     st.title("📘 Projektarbeit Quiz")
     st.write("Teste dein Fach-, Methoden-, Analyse- und Strategiewissen!")
 
-    docx_path = "Projektarbeit.docx"
-    paragraphs = load_paragraphs(docx_path)
+    uploaded_file = st.file_uploader("Projektarbeit (DOCX) hochladen", type="docx")
     categories = ["fachwissen","methoden","analyse","kritik","transfer"]
 
-    if "quiz" not in st.session_state:
-        st.session_state.quiz = []
+    if uploaded_file:
+        paragraphs = load_paragraphs_from_file(BytesIO(uploaded_file.read()))
+        if "quiz" not in st.session_state:
+            st.session_state.quiz = []
 
-    if st.button("🔄 Neues Quiz generieren"):
-        st.info("Quiz wird generiert, bitte warten...")
-        quiz = generate_quiz(paragraphs, categories, questions_total=5)
-        st.session_state.quiz = quiz
-        st.success("Quiz generiert!")
+        if st.button("🔄 Neues Quiz generieren"):
+            st.info("Quiz wird generiert, bitte warten...")
+            quiz = generate_quiz(paragraphs, categories, questions_total=5)
+            st.session_state.quiz = quiz
+            st.success("Quiz generiert!")
 
-    if st.session_state.quiz:
-        quiz = st.session_state.quiz
-        score = 0
-        for i, q in enumerate(quiz, 1):
-            st.subheader(f"Frage {i} ({q['category']})")
-            st.write(q["question"])
-            choice = st.radio("Antwort auswählen:", q["choices"], key=f"q{i}")
-            if st.button(f"Antwort bestätigen {i}", key=f"btn{i}"):
-                if choice == q["answer"]:
-                    st.success("✅ Richtig!")
-                    score += 1
-                else:
-                    st.error(f"❌ Falsch! Richtige Antwort: {q['answer']}")
-
-        st.info(f"Dein aktueller Score: {score}/{len(quiz)}")
+        if st.session_state.quiz:
+            quiz = st.session_state.quiz
+            score = 0
+            for i, q in enumerate(quiz, 1):
+                st.subheader(f"Frage {i} ({q['category']})")
+                st.write(q["question"])
+                choice = st.radio("Antwort auswählen:", q["choices"], key=f"q{i}")
+                if st.button(f"Antwort bestätigen {i}", key=f"btn{i}"):
+                    if choice == q["answer"]:
+                        st.success("✅ Richtig!")
+                        score += 1
+                    else:
+                        st.error(f"❌ Falsch! Richtige Antwort: {q['answer']}")
+            st.info(f"Dein aktueller Score: {score}/{len(quiz)}")
 
 if __name__ == "__main__":
     main()
