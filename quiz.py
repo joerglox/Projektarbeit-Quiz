@@ -8,7 +8,7 @@ from docx import Document
 from io import BytesIO
 
 # -----------------------------
-# OpenAI API Key
+# OPENAI API Key
 # -----------------------------
 openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
@@ -28,11 +28,10 @@ def load_paragraphs_from_file(file, min_length=30):
 # -----------------------------
 def split_paragraph(paragraph, max_length=300):
     words = paragraph.split()
-    parts = []
-    current = ""
+    parts, current = [], ""
     for word in words:
         if len(current) + len(word) + 1 <= max_length:
-            current += " " + word if current else word
+            current += (" " + word) if current else word
         else:
             parts.append(current)
             current = word
@@ -44,44 +43,68 @@ def split_paragraph(paragraph, max_length=300):
 # GPT-Frage generieren
 # -----------------------------
 def generate_question_gpt(paragraph, category, retries=3):
-    prompt = f"""
-Du bist ein Quiz-Generator. Erstelle eine kritische Prüfungsfrage der Kategorie '{category}' aus folgendem Absatz:
+    guidelines = """
+Ziel der Fragen:
+Die Fragen dienen der Vorbereitung auf das Fachgespräch und die Verteidigung der Projektarbeit.
 
+Jede Frage soll prüfen:
+- Das Verständnis der Inhalte und Zusammenhänge der eigenen Projektarbeit
+- Die Begründung für die Auswahl und Anwendung der verwendeten Methoden
+- Das Verständnis der Funktionsweise dieser Methoden
+- Das Wissen über alternative Methoden und deren Funktionsweisen
+- Die Fähigkeit, Auswirkungen veränderter Rahmenbedingungen oder Zahlen auf das Ergebnis zu beurteilen
+- Das Erkennen alternativer Szenarien und deren Einfluss auf die getroffene Empfehlung
+- Fachkompetenz (Inhalte und Konzepte sicher beherrschen)
+- Methodenkompetenz (Methoden richtig anwenden und vergleichen können)
+- Analysefähigkeit (Schlüsse ziehen, Ursachen erkennen, Ergebnisse bewerten)
+- Strategisches Denken (Implikationen und Handlungsempfehlungen ableiten)
+- Verständnis komplexer Zusammenhänge und deren Bedeutung im Projektkontext
+"""
+
+    prompt = f"""
+Du bist ein erfahrener Prüfer und sollst eine hochwertige, kritische Prüfungsfrage auf Basis des folgenden Projektabsatzes erstellen:
+
+Kategorie: {category}
+Absatz:
 {paragraph}
 
-Die Frage soll prüfen:
-- Verständnis der Projektarbeit
-- Warum diese Methode eingesetzt wurde
-- Funktionsweise der Methode
-- Alternativen und deren Funktionsweise
-- Auswirkungen von Rahmenbedingungsänderungen
-- Szenarien, die zu anderen Empfehlungen führen könnten
-- Fach-, Methoden-, Analyse- und strategische Kompetenz
+{guidelines}
 
-Antwort im JSON-Format mit:
+Erstelle genau **eine** anspruchsvolle Frage im JSON-Format:
 {{
-"question": "Frage als vollständiger Satz",
-"choices": ["Antwort A","Antwort B","Antwort C","Antwort D"],
-"answer": "Antwort A",
-"category": "{category}"
+  "question": "Frage als vollständiger Satz",
+  "choices": ["Antwort A","Antwort B","Antwort C","Antwort D"],
+  "answer": "Antwort A",
+  "category": "{category}"
 }}
+Jede Antwortmöglichkeit muss ein vollständiger, klarer Satz sein.
+Die richtige Antwort muss inhaltlich korrekt und nachvollziehbar sein.
 """
+
     for _ in range(retries):
         try:
             response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=600
             )
             content = response.choices[0].message.content.strip()
-            data = json.loads(content)
-            # Nachbearbeitung: "..." entfernen
+
+            # Versuche JSON sauber zu laden
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                start = content.find("{")
+                end = content.rfind("}") + 1
+                data = json.loads(content[start:end])
+
+            # Nachbearbeitung
             data["question"] = data["question"].replace("...", "").strip()
             data["answer"] = data["answer"].replace("...", "").strip()
             data["choices"] = [c.replace("...", "").strip() for c in data["choices"]]
             data["category"] = category
             return data
-        except Exception:
+        except Exception as e:
             time.sleep(1)
     return None
 
@@ -114,7 +137,6 @@ def generate_quiz(paragraphs, categories, questions_total=10):
 def main():
     st.set_page_config(page_title="Projektarbeit Quiz", layout="centered")
 
-    # Style für Dark/Light Mode
     st.markdown("""
         <style>
         .main {
@@ -150,7 +172,7 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("📘 Projektarbeit Quiz")
-    st.write("Teste dein Fach-, Methoden-, Analyse- und Strategiewissen!")
+    st.write("Teste dein Fach-, Methoden-, Analyse- und Strategiewissen — wie im echten Fachgespräch!")
 
     uploaded_file = st.file_uploader("📄 Lade deine Projektarbeit (DOCX)", type="docx")
     categories = ["fachwissen", "methoden", "analyse", "kritik", "transfer"]
