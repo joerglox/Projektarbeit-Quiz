@@ -17,14 +17,14 @@ if not openai.api_key:
     st.stop()
 
 # -----------------------------
-# Speicher für DOCX
+# Speicher für hochgeladene DOCX
 # -----------------------------
 STORAGE_DIR = Path(".streamlit_data")
 STORAGE_DIR.mkdir(exist_ok=True)
 SAVED_DOCX_PATH = STORAGE_DIR / "saved_projektarbeit.docx"
 
 # -----------------------------
-# DOCX einlesen & filtern
+# DOCX einlesen
 # -----------------------------
 def load_paragraphs_from_file(file, min_length=30):
     doc = Document(file)
@@ -32,10 +32,8 @@ def load_paragraphs_from_file(file, min_length=30):
     for p in doc.paragraphs:
         text = p.text.strip()
         lower = text.lower()
-        # Anhänge sinnvoll nutzen, Prozessflüsse ignorieren
-        if len(text) > min_length and (
-            "prozessfluss" not in lower
-        ):
+        # Prozessflüsse ignorieren, Anhänge nur relevant für Rechnungen/Nutzwertanalyse/Bewertungskriterien
+        if len(text) > min_length and ("prozessfluss" not in lower):
             paragraphs.append(text)
     return paragraphs
 
@@ -43,10 +41,8 @@ def filter_paragraphs(paragraphs):
     allowed = []
     for p in paragraphs:
         lower = p.lower()
-        # Prozessfluss ignorieren
         if "prozessfluss" in lower:
             continue
-        # Anhänge nur für Rechnungen/Nutzwertanalyse/Bewertungskriterien
         if any(k in lower for k in ["rechnung","nutzwertanalyse","bewertungskriterien"]):
             allowed.append(p)
         elif not lower.startswith("anhang"):
@@ -60,10 +56,9 @@ def assign_chapters(paragraphs):
     chapter = "allgemein"
     paragraphs_with_chapter = []
     for p in paragraphs:
-        # Erkennen von Kapitelüberschriften z.B. "1. Einleitung"
         parts = p.strip().split()
         if parts and parts[0].replace(".","").isdigit():
-            chapter = parts[1] if len(parts)>1 else chapter
+            chapter = parts[1] if len(parts) > 1 else chapter
         paragraphs_with_chapter.append({"text": p, "chapter": chapter})
     return paragraphs_with_chapter
 
@@ -125,12 +120,10 @@ Bitte die Antwortmöglichkeiten **zufällig mischen**.
             data["question"] = data["question"].replace("...", "").strip()
             data["answer"] = data["answer"].replace("...", "").strip()
             data["choices"] = [c.replace("...", "").strip() for c in data["choices"]]
-
             # Richtiges mischen
             correct = data["answer"]
             random.shuffle(data["choices"])
             data["answer"] = correct
-
             data["category"] = category
             return data
         except Exception:
