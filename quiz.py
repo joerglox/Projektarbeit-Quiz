@@ -19,6 +19,7 @@ if not openai.api_key:
 # DOCX einlesen
 # -----------------------------
 def load_paragraphs_from_file(file, min_length=30):
+    """Lädt Absätze aus einer DOCX-Datei, filtert leere und zu kurze Passagen."""
     doc = Document(file)
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     return [p for p in paragraphs if len(p) > min_length]
@@ -40,7 +41,7 @@ def split_paragraph(paragraph, max_length=300):
     return parts
 
 # -----------------------------
-# Methoden-Liste
+# Methoden-Liste festlegen
 # -----------------------------
 methods_used = [
     "Prozessflussanalyse",
@@ -56,10 +57,12 @@ methods_used = [
 # Antworten mischen
 # -----------------------------
 def shuffle_choices(q):
+    """Mische die Antwortmöglichkeiten und erhalte die richtige Antwort korrekt."""
     choices = q["choices"]
     correct = q["answer"]
     random.shuffle(choices)
     q["choices"] = choices
+    # Die richtige Antwort bleibt inhaltlich korrekt
     q["answer"] = correct
     return q
 
@@ -67,8 +70,9 @@ def shuffle_choices(q):
 # GPT-Frage generieren
 # -----------------------------
 def generate_question_gpt(paragraph, category, methods_used, retries=3):
+    """Erstellt eine anspruchsvolle Prüfungsfrage auf Basis des Absatzes."""
     prompt = f"""
-Du bist ein erfahrener Prüfer. Erstelle eine hochwertige Prüfungsfrage auf Basis des Absatzes:
+Du bist ein erfahrener Prüfer im Fachgespräch. Erstelle eine hochwertige Frage auf Basis des folgenden Textes:
 
 Kategorie: {category}
 Absatz:
@@ -80,7 +84,7 @@ Die Frage soll prüfen:
 - Verständnis der Projektarbeit
 - Warum Methoden eingesetzt wurden
 - Funktionsweise der Methoden
-- Alternative Methoden
+- Alternative Methoden (mindestens 1 Frage pro Runde)
 - Auswirkungen von Änderungen
 - Fach-, Methoden-, Analyse- und strategische Kompetenz
 
@@ -92,6 +96,7 @@ Antwort im JSON-Format:
   "category": "{category}"
 }}
 Jede Antwortmöglichkeit muss ein vollständiger, klarer Satz sein.
+Die richtige Antwort muss inhaltlich korrekt sein.
 """
     for _ in range(retries):
         try:
@@ -107,49 +112,52 @@ Jede Antwortmöglichkeit muss ein vollständiger, klarer Satz sein.
             data["choices"] = [c.replace("...", "").strip() for c in data["choices"]]
             data["answer"] = data["answer"].replace("...", "").strip()
             data["category"] = category
-            return shuffle_choices(data)
+            # Antworten mischen
+            data = shuffle_choices(data)
+            return data
         except Exception:
             time.sleep(1)
     return None
 
 # -----------------------------
-# Quiz generieren mit 6/3/1-Verteilung und 1 Frage Alternativmethoden
+# Quiz generieren
 # -----------------------------
-def generate_quiz(paragraphs, categories, methods_used):
+def generate_quiz(paragraphs, categories, methods_used, questions_total=10):
     quiz = []
+    alt_question_added = False
 
-    # Kapitel 4: Methoden → 6 Fragen
-    method_paragraphs = [p for p in paragraphs if p.startswith("4.")]
-    for _ in range(6):
-        para = random.choice(method_paragraphs)
-        q = generate_question_gpt(para, "methoden", methods_used)
-        if q: quiz.append(q)
+    while len(quiz) < questions_total:
+        category = random.choice(categories)
+        paragraph = random.choice(paragraphs)
+        parts = split_paragraph(paragraph, max_length=350)
 
-    # Kapitel 5-6: Zusammenfassung/Empfehlung → 3 Fragen
-    summary_paragraphs = [p for p in paragraphs if p.startswith("5.") or p.startswith("6.")]
-    for _ in range(3):
-        para = random.choice(summary_paragraphs)
-        category = random.choice(["analyse","kritik","transfer"])
-        q = generate_question_gpt(para, category, methods_used)
-        if q: quiz.append(q)
+        for part in parts:
+            q = generate_question_gpt(part, category, methods_used)
+            if q:
+                # Alternativfrage sicherstellen
+                if not alt_question_added and any(word in q["question"].lower() for word in ["alternative", "statt", "andere methode"]):
+                    alt_question_added = True
+                quiz.append(q)
+                if len(quiz) >= questions_total:
+                    break
+        if len(quiz) >= questions_total:
+            break
 
-    # Restliche Kapitel → 1 Frage
-    other_paragraphs = [p for p in paragraphs if p not in method_paragraphs + summary_paragraphs]
-    para = random.choice(other_paragraphs)
-    category = random.choice(categories)
-    q = generate_question_gpt(para, category, methods_used)
-    if q: quiz.append(q)
-
-    # Mindestens 1 Frage Alternativmethoden
-    alt_idx = random.randint(0, len(quiz)-1)
-    m = random.choice(methods_used)
-    quiz[alt_idx] = shuffle_choices({
-        "question": f"Welche alternative Methode hätte anstelle von {m} verwendet werden können?",
-        "choices": ["SWOT-Analyse", "ABC-Analyse", "Monte-Carlo-Simulation", "Nutzwertanalyse"],
-        "answer": "Nutzwertanalyse",
-        "category": "methoden"
-    })
-
+    # Falls keine Alternativfrage erstellt wurde → gezielt eine hinzufügen
+    if not alt_question_added and methods_used:
+        m = random.choice(methods_used)
+        q_alt = {
+            "question": f"Welche alternative Methode hätte anstelle von {m} in der Projektarbeit eingesetzt werden können?",
+            "choices": [
+                f"Die SWOT-Analyse, um strategische Chancen und Risiken zu bewerten.",
+                f"Die ABC-Analyse, um Prioritäten bei Einflussfaktoren zu setzen.",
+                f"Die Monte-Carlo-Simulation, um Unsicherheiten quantitativ zu analysieren.",
+                f"Die Nutzwertanalyse, um Entscheidungsoptionen zu bewerten."
+            ],
+            "answer": "Die Nutzwertanalyse, um Entscheidungsoptionen zu bewerten.",
+            "category": "methoden"
+        }
+        quiz[random.randint(0, len(quiz) - 1)] = shuffle_choices(q_alt)
     return quiz
 
 # -----------------------------
@@ -190,7 +198,7 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("📘 Projektarbeit Quiz")
-    st.caption("Interaktives Fachgespräch-Training.")
+    st.caption("Lerne, verteidige, überzeuge — interaktives Fachgespräch-Training.")
 
     uploaded_file = st.file_uploader("📄 Lade deine Projektarbeit (DOCX)", type="docx")
     categories = ["fachwissen", "methoden", "analyse", "kritik", "transfer"]
@@ -201,7 +209,7 @@ def main():
 
         if st.button("🎯 Quiz generieren"):
             st.info("Quiz wird erstellt... bitte warten ⏳")
-            quiz = generate_quiz(paragraphs, categories, methods_used)
+            quiz = generate_quiz(paragraphs, categories, methods_used, questions_total=10)
             st.session_state.quiz = quiz
             st.session_state.current_index = 0
             st.session_state.score = 0
@@ -234,6 +242,7 @@ def main():
                 st.balloons()
                 st.subheader("🏁 Quiz abgeschlossen!")
                 st.write(f"**Gesamtscore: {st.session_state.score}/{len(quiz)}**")
+
                 st.markdown("### 📊 Kategorie-Statistik")
                 for cat, stats in st.session_state.stats.items():
                     total, correct = stats["total"], stats["correct"]
