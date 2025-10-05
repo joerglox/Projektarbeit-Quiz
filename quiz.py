@@ -80,7 +80,7 @@ Die Frage soll prüfen:
 - Verständnis der Projektarbeit
 - Warum Methoden eingesetzt wurden
 - Funktionsweise der Methoden
-- Alternative Methoden (mindestens 1 Frage pro Runde)
+- Alternative Methoden
 - Auswirkungen von Änderungen
 - Fach-, Methoden-, Analyse- und strategische Kompetenz
 
@@ -113,7 +113,7 @@ Jede Antwortmöglichkeit muss ein vollständiger, klarer Satz sein.
     return None
 
 # -----------------------------
-# Quiz generieren mit 6/3/1-Verteilung
+# Quiz generieren mit 6/3/1-Verteilung und 1 Frage Alternativmethoden
 # -----------------------------
 def generate_quiz(paragraphs, categories, methods_used):
     quiz = []
@@ -144,10 +144,32 @@ def generate_quiz(paragraphs, categories, methods_used):
         q = generate_question_gpt(para, category, methods_used)
         if q: quiz.append(q)
 
-    # Sicherstellen, dass mindestens 1 Frage Alternativmethoden enthält
-    if not any("alternative" in q["question"].lower() for q in quiz):
+    # Sicherstellen: mindestens 1 Frage zu Alternativmethoden
+    alt_indices = list(range(len(quiz)))
+    random.shuffle(alt_indices)
+    alt_inserted = False
+    for idx in alt_indices:
+        q = quiz[idx]
+        if "alternative" not in q["question"].lower():
+            m = random.choice(methods_used)
+            alt_question = {
+                "question": f"Welche alternative Methode hätte anstelle von {m} verwendet werden können?",
+                "choices": [
+                    f"SWOT-Analyse",
+                    f"ABC-Analyse",
+                    f"Monte-Carlo-Simulation",
+                    f"Nutzwertanalyse"
+                ],
+                "answer": "Nutzwertanalyse",
+                "category": "methoden"
+            }
+            quiz[idx] = shuffle_choices(alt_question)
+            alt_inserted = True
+            break
+    if not alt_inserted:
+        # Wenn zufällig keine ersetzt wurde, setze letzte Frage auf Alternativmethoden
         m = random.choice(methods_used)
-        q_alt = {
+        quiz[-1] = shuffle_choices({
             "question": f"Welche alternative Methode hätte anstelle von {m} verwendet werden können?",
             "choices": [
                 f"SWOT-Analyse",
@@ -157,8 +179,7 @@ def generate_quiz(paragraphs, categories, methods_used):
             ],
             "answer": "Nutzwertanalyse",
             "category": "methoden"
-        }
-        quiz[random.randint(0, len(quiz)-1)] = shuffle_choices(q_alt)
+        })
 
     return quiz
 
@@ -200,7 +221,7 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("📘 Projektarbeit Quiz")
-    st.caption("Lerne, verteidige, überzeuge — interaktives Fachgespräch-Training.")
+    st.caption("Interaktives Fachgespräch-Training.")
 
     uploaded_file = st.file_uploader("📄 Lade deine Projektarbeit (DOCX)", type="docx")
     categories = ["fachwissen", "methoden", "analyse", "kritik", "transfer"]
