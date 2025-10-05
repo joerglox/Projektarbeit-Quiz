@@ -12,7 +12,7 @@ from io import BytesIO
 # -----------------------------
 openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
-    st.error("❌ Kein OpenAI API Key gefunden! Bitte setze OPENAI_API_KEY in den Streamlit Secrets oder als Umgebungsvariable.")
+    st.error("❌ Kein OpenAI API Key gefunden! Bitte setze OPENAI_API_KEY als Umgebungsvariable oder in Streamlit Secrets.")
     st.stop()
 
 # -----------------------------
@@ -28,7 +28,6 @@ def load_paragraphs_from_file(file, min_length=30):
 # Absatz splitten
 # -----------------------------
 def split_paragraph(paragraph, max_length=300):
-    """Teilt lange Absätze in mehrere Blöcke."""
     words = paragraph.split()
     parts, current = [], ""
     for word in words:
@@ -42,44 +41,49 @@ def split_paragraph(paragraph, max_length=300):
     return parts
 
 # -----------------------------
-# GPT-Frage generieren (mit Methodenfilter)
+# Methoden-Liste festlegen
 # -----------------------------
-def generate_question_gpt(paragraph, category, methods_used=None, retries=3):
-    """Erstellt eine hochwertige, prüfungsnahe Frage basierend auf einem Absatz."""
-    
-    methods_used_text = ", ".join(methods_used) if methods_used else "nicht angegeben"
+methods_used = [
+    "Prozessflussanalyse",
+    "FMEA",
+    "Know-how- und Technologieerhalt",
+    "Make-or-Buy Kostenvergleich",
+    "Szenarioanalyse",
+    "Nutzwertanalyse",
+    "SWOT-Analyse"
+]
 
+# -----------------------------
+# GPT-Frage generieren
+# -----------------------------
+def generate_question_gpt(paragraph, category, methods_used, retries=3):
+    """Erstellt eine anspruchsvolle Prüfungsfrage auf Basis des Absatzes."""
     prompt = f"""
-Du bist ein erfahrener Prüfer im Fachgespräch. Erstelle eine anspruchsvolle, realistische Frage aus folgendem Abschnitt einer Projektarbeit.
+Du bist ein erfahrener Prüfer im Fachgespräch. Erstelle eine hochwertige Frage auf Basis des folgenden Textes:
 
 Kategorie: {category}
 Absatz:
 {paragraph}
 
-In der Projektarbeit wurden folgende Methoden verwendet oder genannt:
-{methods_used_text}
+Verwendete Methoden in der Arbeit: {', '.join(methods_used)}
 
-Die Frage darf sich **nur auf diese Methoden oder deren realistische Alternativen** beziehen.
-Erfinde keine Methoden, die nicht im Text vorkommen.
-Falls es sich anbietet, kannst du **eine (1) Frage pro Quiz** zu alternativen Methoden formulieren
-(z. B. „Welche andere Methode hätte statt der FMEA verwendet werden können?“),
-aber markiere nie eine tatsächlich genutzte Methode als falsch.
-
-Die Fragen dienen zur Vorbereitung auf das Fachgespräch und sollen prüfen:
+Die Frage soll prüfen:
 - Verständnis der Projektarbeit
 - Warum Methoden eingesetzt wurden
-- Wie sie funktionieren
-- Welche Alternativen es gibt (falls relevant)
+- Funktionsweise der Methoden
+- Alternative Methoden (mindestens 1 Frage pro Runde)
 - Auswirkungen von Änderungen
 - Fach-, Methoden-, Analyse- und strategische Kompetenz
 
-Antworte im JSON-Format:
+Antwort im JSON-Format:
 {{
   "question": "Frage als vollständiger Satz",
   "choices": ["Antwort A","Antwort B","Antwort C","Antwort D"],
   "answer": "Antwort A",
   "category": "{category}"
 }}
+Jede Antwortmöglichkeit muss ein vollständiger, klarer Satz sein.
+Die richtige Antwort muss inhaltlich korrekt sein.
 """
     for _ in range(retries):
         try:
@@ -89,37 +93,17 @@ Antworte im JSON-Format:
                 max_tokens=650
             )
             content = response.choices[0].message.content.strip()
-
-            # JSON-Bereich isolieren
+            # JSON sauber extrahieren
             start, end = content.find("{"), content.rfind("}") + 1
             data = json.loads(content[start:end])
-
-            # Nachbearbeitung
             data["question"] = data["question"].replace("...", "").strip()
             data["choices"] = [c.replace("...", "").strip() for c in data["choices"]]
             data["answer"] = data["answer"].replace("...", "").strip()
             data["category"] = category
             return data
-
         except Exception:
             time.sleep(1)
     return None
-
-# -----------------------------
-# Methoden in der Arbeit erkennen
-# -----------------------------
-def extract_methods(paragraphs):
-    """Identifiziert häufig genannte Methoden aus dem Text."""
-    methods = [
-        "FMEA", "Nutzwertanalyse", "SWOT", "Ishikawa", "Pareto", "ABC-Analyse", "Risikoanalyse",
-        "Prozessanalyse", "Kosten-Nutzen-Analyse", "Fehlerbaum", "5-Why", "Benchmarking"
-    ]
-    found = []
-    text = " ".join(paragraphs).lower()
-    for m in methods:
-        if m.lower() in text:
-            found.append(m)
-    return found
 
 # -----------------------------
 # Quiz generieren
@@ -136,7 +120,7 @@ def generate_quiz(paragraphs, categories, methods_used, questions_total=10):
         for part in parts:
             q = generate_question_gpt(part, category, methods_used)
             if q:
-                # Mindestens eine Frage zur Methodenalternaive
+                # Alternativfrage sicherstellen
                 if not alt_question_added and any(word in q["question"].lower() for word in ["alternative", "statt", "andere methode"]):
                     alt_question_added = True
                 quiz.append(q)
@@ -145,7 +129,7 @@ def generate_quiz(paragraphs, categories, methods_used, questions_total=10):
         if len(quiz) >= questions_total:
             break
 
-    # Falls keine Alternativfrage erstellt wurde, gezielt eine hinzufügen
+    # Falls keine Alternativfrage erstellt wurde → gezielt eine hinzufügen
     if not alt_question_added and methods_used:
         m = random.choice(methods_used)
         q_alt = {
@@ -200,15 +184,14 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("📘 Projektarbeit Quiz")
-    st.caption("Lerne, verteidige, überzeuge — dein interaktives Fachgespräch-Training.")
+    st.caption("Lerne, verteidige, überzeuge — interaktives Fachgespräch-Training.")
 
     uploaded_file = st.file_uploader("📄 Lade deine Projektarbeit (DOCX)", type="docx")
     categories = ["fachwissen", "methoden", "analyse", "kritik", "transfer"]
 
     if uploaded_file:
         paragraphs = load_paragraphs_from_file(BytesIO(uploaded_file.read()))
-        methods_used = extract_methods(paragraphs)
-        st.info(f"🧩 Erkannte Methoden in der Arbeit: {', '.join(methods_used) if methods_used else 'Keine spezifischen Methoden erkannt'}")
+        st.info(f"🧩 Methoden in der Arbeit: {', '.join(methods_used)}")
 
         if st.button("🎯 Quiz generieren"):
             st.info("Quiz wird erstellt... bitte warten ⏳")
