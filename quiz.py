@@ -121,16 +121,13 @@ def generate_quiz(paragraphs, categories, methods_used):
     # Kapitel 4: Methoden → 6 Fragen
     method_paragraphs = [p for p in paragraphs if p.startswith("4.")]
     for _ in range(6):
-        if not method_paragraphs: break
         para = random.choice(method_paragraphs)
-        category = "methoden"
-        q = generate_question_gpt(para, category, methods_used)
+        q = generate_question_gpt(para, "methoden", methods_used)
         if q: quiz.append(q)
 
     # Kapitel 5-6: Zusammenfassung/Empfehlung → 3 Fragen
     summary_paragraphs = [p for p in paragraphs if p.startswith("5.") or p.startswith("6.")]
     for _ in range(3):
-        if not summary_paragraphs: break
         para = random.choice(summary_paragraphs)
         category = random.choice(["analyse","kritik","transfer"])
         q = generate_question_gpt(para, category, methods_used)
@@ -138,48 +135,20 @@ def generate_quiz(paragraphs, categories, methods_used):
 
     # Restliche Kapitel → 1 Frage
     other_paragraphs = [p for p in paragraphs if p not in method_paragraphs + summary_paragraphs]
-    if other_paragraphs:
-        para = random.choice(other_paragraphs)
-        category = random.choice(categories)
-        q = generate_question_gpt(para, category, methods_used)
-        if q: quiz.append(q)
+    para = random.choice(other_paragraphs)
+    category = random.choice(categories)
+    q = generate_question_gpt(para, category, methods_used)
+    if q: quiz.append(q)
 
-    # Sicherstellen: mindestens 1 Frage zu Alternativmethoden
-    alt_indices = list(range(len(quiz)))
-    random.shuffle(alt_indices)
-    alt_inserted = False
-    for idx in alt_indices:
-        q = quiz[idx]
-        if "alternative" not in q["question"].lower():
-            m = random.choice(methods_used)
-            alt_question = {
-                "question": f"Welche alternative Methode hätte anstelle von {m} verwendet werden können?",
-                "choices": [
-                    f"SWOT-Analyse",
-                    f"ABC-Analyse",
-                    f"Monte-Carlo-Simulation",
-                    f"Nutzwertanalyse"
-                ],
-                "answer": "Nutzwertanalyse",
-                "category": "methoden"
-            }
-            quiz[idx] = shuffle_choices(alt_question)
-            alt_inserted = True
-            break
-    if not alt_inserted:
-        # Wenn zufällig keine ersetzt wurde, setze letzte Frage auf Alternativmethoden
-        m = random.choice(methods_used)
-        quiz[-1] = shuffle_choices({
-            "question": f"Welche alternative Methode hätte anstelle von {m} verwendet werden können?",
-            "choices": [
-                f"SWOT-Analyse",
-                f"ABC-Analyse",
-                f"Monte-Carlo-Simulation",
-                f"Nutzwertanalyse"
-            ],
-            "answer": "Nutzwertanalyse",
-            "category": "methoden"
-        })
+    # Mindestens 1 Frage Alternativmethoden
+    alt_idx = random.randint(0, len(quiz)-1)
+    m = random.choice(methods_used)
+    quiz[alt_idx] = shuffle_choices({
+        "question": f"Welche alternative Methode hätte anstelle von {m} verwendet werden können?",
+        "choices": ["SWOT-Analyse", "ABC-Analyse", "Monte-Carlo-Simulation", "Nutzwertanalyse"],
+        "answer": "Nutzwertanalyse",
+        "category": "methoden"
+    })
 
     return quiz
 
