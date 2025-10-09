@@ -18,7 +18,7 @@ if not openai.api_key:
 # -----------------------------
 # DOCX einlesen
 # -----------------------------
-def load_paragraphs_from_file(file, min_length=30):
+def load_paragraphs_from_file(file, min_length=20):
     """Lädt Absätze aus einer DOCX-Datei, filtert leere und zu kurze Passagen."""
     doc = Document(file)
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
@@ -72,7 +72,7 @@ def shuffle_choices(q):
 def generate_question_gpt(paragraph, category, methods_used, retries=3):
     """Erstellt eine anspruchsvolle Prüfungsfrage auf Basis des Absatzes."""
     prompt = f"""
-Du bist ein erfahrener Prüfer im Fachgespräch. Erstelle eine hochwertige Frage auf Basis des folgenden Textes:
+Du bist ein erfahrener Prüfer im Fachgespräch zum technischen Betriebswirt der IHK. In der Prüfung nimmst Du die Rolle des Vorstandes oder der Geschäftsführung ein.Erstelle eine hochwertige Frage auf Basis des folgenden Textes:
 
 Kategorie: {category}
 Absatz:
@@ -81,12 +81,13 @@ Absatz:
 Verwendete Methoden in der Arbeit: {', '.join(methods_used)}
 
 Die Frage soll prüfen:
-- Verständnis der Projektarbeit
-- Warum Methoden eingesetzt wurden
-- Funktionsweise der Methoden
-- Alternative Methoden (mindestens 1 Frage pro Runde)
-- Auswirkungen von Änderungen
-- Fach-, Methoden-, Analyse- und strategische Kompetenz
+- das die Projektarbeit verstanden und selbst durchgeführt wurde
+- Warum die Methoden an der Stelle (technisch, wirtschaftlich oder strategisch) eingesetzt wurden
+- Wie die Methode angewendet wird und wie das Vorgehen bei der Anwendung ist
+- Welche aAlternativen Methoden (mindestens 1 Frage pro Runde) hätten angewendet werden können und wie diese angewendet werden
+- Wie sich Änderungen in den Rahmenbedingungen auf die Ergebnisse Auswirkungen
+- Wie sich Änderungen in den Rahmenbedingungen auf die Empfehlung an die Geschäftsleitung Auswirken
+- Fach-, Methoden-, Analyse- und strategische Kompetenz zu den Lerninhalten gemäß Rahmenlehrplan für den technischen Betriebswirt IHK
 
 Antwort im JSON-Format:
 {{
