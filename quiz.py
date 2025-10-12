@@ -2,275 +2,219 @@ import os
 import re
 import random
 import time
-import json
 from io import BytesIO
 from PyPDF2 import PdfReader
 from docx import Document
 import streamlit as st
 
 # -------------------------------------------------
-# 🧭 Inhaltsverzeichnis (TOC) aus PDF extrahieren
+# 🔍 Inhaltsverzeichnis aus PDF extrahieren
 # -------------------------------------------------
 def extract_toc_from_pdf(file_stream):
     reader = PdfReader(file_stream)
-    n_pages = len(reader.pages)
-    toc_candidate_idx = None
-
-    for i in range(min(8, n_pages)):
-        text = reader.pages[i].extract_text() or ""
-        if re.search(r"Inhaltsverzeichnis", text, re.IGNORECASE):
-            toc_candidate_idx = i
-            break
-
-    text_toc = ""
-    if toc_candidate_idx is not None:
-        for j in range(toc_candidate_idx, min(toc_candidate_idx + 6, n_pages)):
-            text_toc += "\n" + (reader.pages[j].extract_text() or "")
-    else:
-        for i in range(min(12, n_pages)):
-            text_toc += "\n" + (reader.pages[i].extract_text() or "")
-
-    lines = text_toc.splitlines()
+    text_all = ""
+    for page in reader.pages[:50]:  # ersten 50 Seiten durchsuchen
+        text_all += "\n" + (page.extract_text() or "")
+    lines = text_all.splitlines()
     toc_entries = []
-    toc_line_re = re.compile(r"^\s*(\d+(?:\.\d+)*)\s+(.+?)\s+\.{3,}\s*(\d+)\s*$")
-    toc_line_re2 = re.compile(r"^\s*(\d+(?:\.\d+)*)\s+(.+?)\s+(\d+)\s*$")
-
+    toc_line = re.compile(r"^\s*(\d+(?:\.\d+)*)\s+(.+?)\s+\.{2,}\s*(\d+)\s*$")
     for ln in lines:
-        ln = ln.strip()
-        if not ln:
-            continue
-        m = toc_line_re.match(ln)
-        if not m:
-            m = toc_line_re2.match(ln)
+        m = toc_line.match(ln.strip())
         if m:
-            chap_num = m.group(1).strip()
-            chap_title = m.group(2).strip()
-            printed_page = int(m.group(3))
+            num, title, page = m.groups()
             toc_entries.append({
-                "chapter_label": f"{chap_num} {chap_title}",
-                "chapter_num": chap_num,
-                "chapter_title": chap_title,
-                "printed_page": printed_page
-            })
-
-    if not toc_entries:
-        simple_re = re.compile(r"^(.+?)\s+(\d{1,3})$")
-        for ln in lines:
-            m = simple_re.match(ln.strip())
-            if m:
-                title = m.group(1).strip()
-                pg = int(m.group(2))
-                toc_entries.append({
-                    "chapter_label": title,
-                    "chapter_num": "",
-                    "chapter_title": title,
-                    "printed_page": pg
-                })
-
-    seen = set()
-    cleaned = []
-    for e in toc_entries:
-        key = (e.get("chapter_title", "").lower(), e.get("printed_page"))
-        if key not in seen:
-            cleaned.append(e)
-            seen.add(key)
-    return cleaned
-
-
-# -------------------------------------------------
-# 📘 Inhaltsverzeichnis aus DOCX extrahieren
-# -------------------------------------------------
-def extract_toc_from_docx(file_stream):
-    doc = Document(file_stream)
-    toc_entries = []
-    toc_pattern = re.compile(r"^(\d+(?:\.\d+)*)\s+(.+?)\s+(\d+)$")
-
-    for p in doc.paragraphs:
-        text = p.text.strip()
-        if not text:
-            continue
-        m = toc_pattern.match(text)
-        if m:
-            chap_num, chap_title, page = m.groups()
-            toc_entries.append({
-                "chapter_label": f"{chap_num} {chap_title}",
-                "chapter_num": chap_num,
-                "chapter_title": chap_title,
+                "chapter_num": num,
+                "chapter_title": title.strip(),
                 "printed_page": int(page)
             })
     return toc_entries
 
+# -------------------------------------------------
+# 📄 Inhaltsverzeichnis aus DOCX
+# -------------------------------------------------
+def extract_toc_from_docx(file_stream):
+    doc = Document(file_stream)
+    toc_entries = []
+    pat = re.compile(r"^(\d+(?:\.\d+)*)\s+(.+?)\s+(\d+)$")
+    for p in doc.paragraphs:
+        m = pat.match(p.text.strip())
+        if m:
+            num, title, page = m.groups()
+            toc_entries.append({
+                "chapter_num": num,
+                "chapter_title": title.strip(),
+                "printed_page": int(page)
+            })
+    return toc_entries
 
 # -------------------------------------------------
-# 🔀 Antwortoptionen aus TOC generieren
+# 📊 Abbildungen, Tabellen, Anhänge aus PDF
 # -------------------------------------------------
-def build_choices_from_toc(correct_entry, toc_list, n_choices=4):
-    def format_entry(e):
-        if e.get("chapter_num"):
-            return f"Kapitel {e['chapter_num']} {e['chapter_title']} — Seite {e['printed_page']}"
-        else:
-            return f"{e['chapter_title']} — Seite {e['printed_page']}"
+def extract_elements_from_pdf(file_stream):
+    reader = PdfReader(file_stream)
+    elements = []
+    pattern = re.compile(r"(Abbildung|Tabelle|Anhang)\s+([\d\.]+)\s*[:\-–]?\s*(.+)", re.IGNORECASE)
+    for page_num, page in enumerate(reader.pages):
+        text = page.extract_text() or ""
+        for line in text.splitlines():
+            m = pattern.search(line)
+            if m:
+                elements.append({
+                    "type": m.group(1).capitalize(),
+                    "label": m.group(2),
+                    "title": m.group(3).strip(),
+                    "page": page_num + 1
+                })
+    return elements
 
-    correct_text = format_entry(correct_entry)
-    candidates = []
-    for e in toc_list:
-        if e is correct_entry:
-            continue
-        candidates.append((abs(e['printed_page'] - correct_entry['printed_page']), e))
-    candidates.sort(key=lambda x: x[0])
-    distractors = [format_entry(e[1]) for e in candidates[:n_choices - 1]]
-
-    if len(distractors) < n_choices - 1:
-        extras = [format_entry(e) for e in toc_list if format_entry(e) not in distractors and format_entry(e) != correct_text]
-        random.shuffle(extras)
-        distractors += extras[:(n_choices - 1) - len(distractors)]
-
-    choices = [correct_text] + distractors
+# -------------------------------------------------
+# 🧩 Antwortoptionen
+# -------------------------------------------------
+def build_choices_from_toc(correct_entry, toc_list, n_choices=4, show_titles=False, include_page=True):
+    def fmt(e):
+        num = e.get("chapter_num","")
+        page = e.get("printed_page","")
+        if show_titles:
+            return f"Kapitel {num} {e['chapter_title']} – Seite {page}"
+        if include_page:
+            return f"Kapitel {num} – Seite {page}"
+        return f"Kapitel {num}"
+    correct = fmt(correct_entry)
+    near = sorted(toc_list, key=lambda x: abs(x["printed_page"] - correct_entry["printed_page"]))
+    distract = [fmt(e) for e in near if e is not correct_entry][:n_choices-1]
+    choices = [correct]+distract
     random.shuffle(choices)
-    return choices, correct_text
-
+    return choices, correct
 
 # -------------------------------------------------
-# 🧠 Navigationsfrage erstellen (deterministisch)
+# 🧠 Professionelle Fragen
 # -------------------------------------------------
-def generate_navigation_question_strict(toc_list, category):
-    correct_entry = random.choice(toc_list)
-    q_types = ["kapitel_seite", "kapitel_only"]
-    q_type = random.choice(q_types)
+def generate_professional_question(toc_list, elements, category):
+    q_types = ["kapitel","abbildung","tabelle","anhang"]
+    q_type = random.choice(q_types if elements else ["kapitel"])
 
-    if q_type == "kapitel_seite":
-        question_text = f"In welchem Kapitel und auf welcher Seite befindet sich \"{correct_entry['chapter_title']}\"?"
-    else:
-        question_text = f"Welches Kapitel behandelt \"{correct_entry['chapter_title']}\"?"
+    # --- Kapitel/Seite ---
+    if q_type == "kapitel":
+        e = random.choice(toc_list)
+        stems = [
+            "Die Bewertung von Risiken wurde wo erwähnt?",
+            "Das methodische Vorgehen wurde wo beschrieben?",
+            "Die Analyse der Ergebnisse findet sich wo?",
+            "Wo wurde die Szenarioanalyse erläutert?",
+            "Die Entscheidungsgrundlage wurde wo dargestellt?"
+        ]
+        question = random.choice(stems)
+        choices, correct = build_choices_from_toc(e, toc_list, n_choices=4, show_titles=False, include_page=True)
+        return {"question":question,"choices":choices,"answer":correct,"category":category}
 
-    choices, correct_text = build_choices_from_toc(correct_entry, toc_list, n_choices=4)
-
-    return {
-        "question": question_text,
-        "choices": choices,
-        "answer": correct_text,
-        "category": category
+    # --- Abbildungen / Tabellen / Anhänge ---
+    subset = [x for x in elements if x["type"].lower()==q_type]
+    if not subset:
+        return generate_professional_question(toc_list, elements, category)
+    e = random.choice(subset)
+    templates={
+        "abbildung":[
+            f"In welcher Abbildung wird „{e['title']}“ gezeigt?",
+            f"Die grafische Darstellung „{e['title']}“ findet sich in welcher Abbildung?"
+        ],
+        "tabelle":[
+            f"Die Ergebnisse zu „{e['title']}“ sind in welcher Tabelle aufgeführt?",
+            f"Wo ist „{e['title']}“ tabellarisch dargestellt?"
+        ],
+        "anhang":[
+            f"In welchem Anhang werden „{e['title']}“ beschrieben?",
+            f"Die Detailauswertung „{e['title']}“ befindet sich in welchem Anhang?"
+        ]
     }
-
+    question=random.choice(templates[q_type])
+    distract=[f"{x['type']} {x['label']}" for x in subset if x is not e]
+    random.shuffle(distract)
+    distract=distract[:3]
+    correct=f"{e['type']} {e['label']}"
+    choices=[correct]+distract
+    random.shuffle(choices)
+    return {"question":question,"choices":choices,"answer":correct,"category":category}
 
 # -------------------------------------------------
-# 🧩 Quiz generieren
+# 🧩 Quiz erstellen
 # -------------------------------------------------
-def generate_quiz_from_toc(toc_list, categories, questions_total=10):
-    quiz = []
-    attempts = 0
-    while len(quiz) < questions_total and attempts < questions_total * 5:
-        category = random.choice(categories)
-        q = generate_navigation_question_strict(toc_list, category)
-        if all(existing["question"] != q["question"] for existing in quiz):
+def generate_full_quiz(toc_list,elements,categories,questions_total=10):
+    quiz=[]
+    while len(quiz)<questions_total:
+        cat=random.choice(categories)
+        q=generate_professional_question(toc_list,elements,cat)
+        if q and q["question"] not in [x["question"] for x in quiz]:
             quiz.append(q)
-        attempts += 1
     return quiz
 
-
 # -------------------------------------------------
-# 🎮 Streamlit App
+# 🎮 Streamlit-App
 # -------------------------------------------------
 def main():
-    st.set_page_config(page_title="Projektarbeit Navigationsquiz", layout="centered")
+    st.set_page_config(page_title="Projektarbeit-Navigationsquiz",layout="centered")
+    st.title("🧭 Navigations- und Struktur-Quiz zur Projektarbeit")
+    st.caption("Teste, ob du dich in deiner Arbeit perfekt zurechtfindest – Kapitel, Anhänge, Abbildungen & Tabellen.")
 
-    st.markdown("""
-    <style>
-    body, .main {
-        background-color: #0e1117;
-        color: #f0f2f6;
-        font-family: 'Inter', sans-serif;
-    }
-    .stButton > button {
-        width: 100%;
-        border-radius: 12px;
-        padding: 12px;
-        color: white;
-        background: linear-gradient(90deg, #007AFF, #00C6FF);
-        border: none;
-        font-weight: bold;
-        transition: 0.3s;
-    }
-    .stButton > button:hover {
-        transform: scale(1.02);
-        background: linear-gradient(90deg, #00C6FF, #007AFF);
-    }
-    .question-card {
-        background: rgba(255,255,255,0.05);
-        padding: 20px;
-        border-radius: 15px;
-        margin-top: 20px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    uploaded=st.file_uploader("📄 Lade deine Projektarbeit (PDF oder DOCX)",type=["pdf","docx"])
+    cats=["Kapitel","Strukturwissen","Abbildungen","Tabellen","Anhänge"]
 
-    st.title("🧭 Navigationsquiz zur Projektarbeit")
-    st.caption("Teste, ob du dich in deiner Arbeit perfekt zurechtfindest – Kapitel, Seiten & Anhänge.")
+    if uploaded:
+        ext=uploaded.name.lower().split(".")[-1]
+        st.info("📖 Analysiere Dokument …")
+        toc=[]; elements=[]
+        data=uploaded.read()
+        if ext=="pdf":
+            toc=extract_toc_from_pdf(BytesIO(data))
+            elements=extract_elements_from_pdf(BytesIO(data))
+        else:
+            toc=extract_toc_from_docx(BytesIO(data))
 
-    uploaded_file = st.file_uploader("📄 Lade deine Projektarbeit (PDF oder DOCX)", type=["pdf", "docx"])
-    categories = ["Kapitel", "Strukturwissen", "Verortung", "Anhänge"]
-
-    if uploaded_file:
-        file_ext = uploaded_file.name.lower().split(".")[-1]
-        st.info("📖 Extrahiere Inhaltsverzeichnis...")
-        toc_entries = []
-
-        if file_ext == "pdf":
-            toc_entries = extract_toc_from_pdf(BytesIO(uploaded_file.read()))
-        elif file_ext == "docx":
-            toc_entries = extract_toc_from_docx(BytesIO(uploaded_file.read()))
-
-        if not toc_entries:
-            st.error("⚠️ Kein Inhaltsverzeichnis erkannt. Bitte überprüfe dein Dokument.")
-            return
-
-        st.success(f"✅ {len(toc_entries)} Kapitel im Inhaltsverzeichnis erkannt.")
-        with st.expander("📜 Erkanntes Inhaltsverzeichnis anzeigen"):
-            for e in toc_entries:
-                st.write(f"- Kapitel {e.get('chapter_num', '')} {e['chapter_title']} (Seite {e['printed_page']})")
+        st.success(f"✅ {len(toc)} Kapitel und {len(elements)} Sonder-Elemente erkannt.")
+        with st.expander("📜 Erkanntes Inhaltsverzeichnis"):
+            for e in toc:
+                st.write(f"- Kapitel {e.get('chapter_num','')} {e['chapter_title']} (Seite {e['printed_page']})")
+        if elements:
+            with st.expander("🖼️ Erkannte Abbildungen / Tabellen / Anhänge"):
+                for el in elements:
+                    st.write(f"- {el['type']} {el['label']}: {el['title']} (Seite {el['page']})")
 
         if st.button("🎯 Quiz starten"):
-            st.info("Quiz wird erstellt... bitte warten ⏳")
-            quiz = generate_quiz_from_toc(toc_entries, categories, questions_total=10)
-            st.session_state.quiz = quiz
-            st.session_state.current_index = 0
-            st.session_state.score = 0
-            st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in categories}
-            st.success("✅ Quiz erfolgreich erstellt!")
+            quiz=generate_full_quiz(toc,elements,cats,questions_total=10)
+            st.session_state.quiz=quiz
+            st.session_state.index=0
+            st.session_state.score=0
+            st.session_state.stats={c:{"correct":0,"total":0} for c in cats}
+            st.success("✅ Quiz erstellt!")
 
     if st.session_state.get("quiz"):
-        quiz = st.session_state.quiz
-        i = st.session_state.current_index
-        q = quiz[i]
-
-        st.markdown(f"<div class='question-card'><h4>Frage {i+1} ({q['category']})</h4><p>{q['question']}</p></div>", unsafe_allow_html=True)
-        choice = st.radio("Antwort auswählen:", q["choices"], key=f"q{i}")
+        qlist=st.session_state.quiz
+        i=st.session_state.index
+        q=qlist[i]
+        st.markdown(f"### Frage {i+1} ({q['category']})")
+        st.write(q["question"])
+        choice=st.radio("Antwort auswählen:",q["choices"],key=f"q{i}")
 
         if st.button("Antwort bestätigen"):
-            cat = q["category"]
-            st.session_state.stats[cat]["total"] += 1
-            if choice == q["answer"]:
+            st.session_state.stats[q["category"]]["total"]+=1
+            if choice==q["answer"]:
                 st.success("✅ Richtig!")
-                st.session_state.score += 1
-                st.session_state.stats[cat]["correct"] += 1
+                st.session_state.score+=1
+                st.session_state.stats[q["category"]]["correct"]+=1
             else:
-                st.error(f"❌ Falsch! Richtige Antwort: {q['answer']}")
+                st.error(f"❌ Falsch! Richtig: {q['answer']}")
             time.sleep(1)
-
-            if i + 1 < len(quiz):
-                st.session_state.current_index += 1
+            if i+1<len(qlist):
+                st.session_state.index+=1
                 st.rerun()
             else:
                 st.balloons()
                 st.subheader("🏁 Quiz abgeschlossen!")
-                st.write(f"**Gesamtscore: {st.session_state.score}/{len(quiz)} ({round((st.session_state.score / len(quiz)) * 100)}%)**")
+                st.write(f"**Gesamt: {st.session_state.score}/{len(qlist)} ("
+                         f"{round(st.session_state.score/len(qlist)*100)} %)**")
+                st.markdown("### 📊 Statistik")
+                for c,s in st.session_state.stats.items():
+                    if s["total"]:
+                        st.write(f"**{c}**: {s['correct']}/{s['total']} richtig")
 
-                st.markdown("### 📊 Kategorie-Statistik")
-                for cat, stats in st.session_state.stats.items():
-                    total, correct = stats["total"], stats["correct"]
-                    if total > 0:
-                        st.write(f"**{cat}**: {correct}/{total} richtig")
-
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
