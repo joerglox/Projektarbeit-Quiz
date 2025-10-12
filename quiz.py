@@ -7,26 +7,26 @@ import streamlit as st
 from docx import Document
 from io import BytesIO
 
-# -----------------------------
-# OPENAI API Key
-# -----------------------------
+# -------------------------------------------------
+# 🔑 OPENAI API Key
+# -------------------------------------------------
 openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
     st.error("❌ Kein OpenAI API Key gefunden! Bitte setze OPENAI_API_KEY als Umgebungsvariable oder in Streamlit Secrets.")
     st.stop()
 
-# -----------------------------
-# DOCX einlesen
-# -----------------------------
+# -------------------------------------------------
+# 📄 DOCX einlesen
+# -------------------------------------------------
 def load_paragraphs_from_file(file, min_length=50):
     """Lädt Absätze aus einer DOCX-Datei, filtert leere und zu kurze Passagen."""
     doc = Document(file)
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     return [p for p in paragraphs if len(p) > min_length]
 
-# -----------------------------
-# Absatz splitten
-# -----------------------------
+# -------------------------------------------------
+# ✂️ Absatz splitten
+# -------------------------------------------------
 def split_paragraph(paragraph, max_length=400):
     words = paragraph.split()
     parts, current = [], ""
@@ -40,129 +40,111 @@ def split_paragraph(paragraph, max_length=400):
         parts.append(current)
     return parts
 
-# -----------------------------
-# Methoden-Liste festlegen
-# -----------------------------
-methods_used = [
+# -------------------------------------------------
+# 🧭 Themen aus der Arbeit
+# -------------------------------------------------
+topics = [
     "Prozessflussanalyse",
     "FMEA",
     "Know-how- und Technologieerhalt",
     "Make-or-Buy Kostenvergleich",
     "Szenarioanalyse",
     "Nutzwertanalyse",
-    "SWOT-Analyse"
+    "SWOT-Analyse",
+    "Abbildung",
+    "Tabelle",
+    "Anhang"
 ]
 
-# -----------------------------
-# Antworten mischen
-# -----------------------------
+# -------------------------------------------------
+# 🔀 Antworten mischen
+# -------------------------------------------------
 def shuffle_choices(q):
     """Mische die Antwortmöglichkeiten und erhalte die richtige Antwort korrekt."""
     choices = q["choices"]
     correct = q["answer"]
     random.shuffle(choices)
     q["choices"] = choices
-    # Die richtige Antwort bleibt inhaltlich korrekt
     q["answer"] = correct
     return q
 
-# -----------------------------
-# GPT-Frage generieren
-# -----------------------------
-def generate_question_gpt(paragraph, category, methods_used, retries=3):
-    """Erstellt eine anspruchsvolle Prüfungsfrage auf Basis des Absatzes."""
+# -------------------------------------------------
+# 🧠 GPT-Frage für Navigationswissen generieren
+# -------------------------------------------------
+def generate_navigation_question(paragraph, category, topics, retries=3):
+    """Erstellt eine Navigationsfrage: Wo in der Arbeit steht etwas (Kapitel, Seite, Anhang, Abbildung, Tabelle)?"""
     prompt = f"""
-Ich muss mich auf die Abschlusspräsentation und die anschießende Verteidigung meiner Arbeit vorbereiten. Ich möchte geprüft werden ob ich den Inhalt meiner Projektarbeit kenne und weiß wo in meiner Projektarbeit der entsprechende Text, die Abbildung oder Formel wiederzufinden ist. Erstelle eine hochwertige Frage auf Basis des folgenden Textes:
+Erstelle eine Navigationsfrage, die prüft, ob jemand weiß, wo sich ein bestimmtes Thema
+in seiner Projektarbeit befindet (Kapitel, Seite, Anhang, Abbildung oder Tabelle).
 
-Kategorie: {category}
-Absatz:
+Die Frage soll **nicht** den Inhalt abfragen, sondern nur das **Auffinden im Dokument**.
+Die Themen stammen aus einer Projektarbeit über Make-or-Buy-Entscheidungen
+in der biopharmazeutischen Produktion.
+
+Textausschnitt:
 {paragraph}
 
-Verwendete Methoden in der Arbeit: {', '.join(methods_used)}
+Wähle zufällig einen Fragetyp:
+1) Kapitel + Seite
+2) Kapitel + Anhang
+3) Kapitel + Abbildung
+4) Kapitel + Tabelle
+5) Abbildung + Kapitel
 
-Die Frage soll prüfen:
-- das die Projektarbeit verstanden und selbst durchgeführt wurde
-- Auf welcher Seite, in welchem Kapitel oder Anhang der entsprechende Text bzw. Inhalt behandelt worden ist
-- wo die entsprechende Berechnung, die entsprechende Abbildung, Tabelle oder Grafik wiederzufinden ist.
+Erstelle die Frage abwechslungsreich, mit vier Antwortmöglichkeiten (A–D),
+von denen genau eine korrekt ist. Gib die Antwort im folgenden JSON-Format zurück:
 
-
-Antwort im JSON-Format:
 {{
   "question": "Frage als vollständiger Satz",
   "choices": ["Antwort A","Antwort B","Antwort C","Antwort D"],
   "answer": "Antwort A",
   "category": "{category}"
 }}
-Jede Antwortmöglichkeit muss ein vollständiger, klarer Satz sein.
-Die richtige Antwort muss inhaltlich korrekt sein.
 """
     for _ in range(retries):
         try:
             response = openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=650
+                max_tokens=700,
             )
             content = response.choices[0].message.content.strip()
             start, end = content.find("{"), content.rfind("}") + 1
             data = json.loads(content[start:end])
-            data["question"] = data["question"].replace("...", "").strip()
-            data["choices"] = [c.replace("...", "").strip() for c in data["choices"]]
-            data["answer"] = data["answer"].replace("...", "").strip()
+            data["question"] = data["question"].strip()
+            data["choices"] = [c.strip() for c in data["choices"]]
+            data["answer"] = data["answer"].strip()
             data["category"] = category
-            # Antworten mischen
-            data = shuffle_choices(data)
-            return data
+            return shuffle_choices(data)
         except Exception:
             time.sleep(1)
     return None
 
-# -----------------------------
-# Quiz generieren
-# -----------------------------
-def generate_quiz(paragraphs, categories, methods_used, questions_total=10):
+# -------------------------------------------------
+# 🧩 Quiz generieren
+# -------------------------------------------------
+def generate_quiz(paragraphs, categories, topics, questions_total=10):
     quiz = []
-    alt_question_added = False
-
     while len(quiz) < questions_total:
         category = random.choice(categories)
         paragraph = random.choice(paragraphs)
         parts = split_paragraph(paragraph, max_length=400)
 
         for part in parts:
-            q = generate_question_gpt(part, category, methods_used)
+            q = generate_navigation_question(part, category, topics)
             if q:
-                # Alternativfrage sicherstellen
-                if not alt_question_added and any(word in q["question"].lower() for word in ["alternative", "statt", "andere methode"]):
-                    alt_question_added = True
                 quiz.append(q)
                 if len(quiz) >= questions_total:
                     break
         if len(quiz) >= questions_total:
             break
-
-    # Falls keine Alternativfrage erstellt wurde → gezielt eine hinzufügen
-    if not alt_question_added and methods_used:
-        m = random.choice(methods_used)
-        q_alt = {
-            "question": f"Welche alternative Methode hätte anstelle von {m} in der Projektarbeit eingesetzt werden können?",
-            "choices": [
-                f"Die SWOT-Analyse, um strategische Chancen und Risiken zu bewerten.",
-                f"Die ABC-Analyse, um Prioritäten bei Einflussfaktoren zu setzen.",
-                f"Die Monte-Carlo-Simulation, um Unsicherheiten quantitativ zu analysieren.",
-                f"Die Nutzwertanalyse, um Entscheidungsoptionen zu bewerten."
-            ],
-            "answer": "Die Nutzwertanalyse, um Entscheidungsoptionen zu bewerten.",
-            "category": "methoden"
-        }
-        quiz[random.randint(0, len(quiz) - 1)] = shuffle_choices(q_alt)
     return quiz
 
-# -----------------------------
-# Streamlit App
-# -----------------------------
+# -------------------------------------------------
+# 🎮 Streamlit App
+# -------------------------------------------------
 def main():
-    st.set_page_config(page_title="Projektarbeit Quiz", layout="centered")
+    st.set_page_config(page_title="Projektarbeit Navigationsquiz", layout="centered")
 
     st.markdown("""
     <style>
@@ -195,19 +177,19 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    st.title("📘 Projektarbeit Quiz")
-    st.caption("Lerne, verteidige, überzeuge — interaktives Fachgespräch-Training.")
+    st.title("🧭 Navigationsquiz zur Projektarbeit")
+    st.caption("Teste, ob du dich in deiner Arbeit perfekt zurechtfindest – Kapitel, Seiten, Abbildungen & Anhänge.")
 
     uploaded_file = st.file_uploader("📄 Lade deine Projektarbeit (DOCX)", type="docx")
-    categories = ["fachwissen", "methoden", "analyse", "kritik", "transfer"]
+    categories = ["strukturwissen", "verortung", "abbildungen", "tabellen", "anhang"]
 
     if uploaded_file:
         paragraphs = load_paragraphs_from_file(BytesIO(uploaded_file.read()))
-        st.info(f"🧩 Methoden in der Arbeit: {', '.join(methods_used)}")
+        st.info(f"📚 Themen in der Arbeit: {', '.join(topics)}")
 
-        if st.button("🎯 Quiz generieren"):
+        if st.button("🎯 Quiz starten"):
             st.info("Quiz wird erstellt... bitte warten ⏳")
-            quiz = generate_quiz(paragraphs, categories, methods_used, questions_total=10)
+            quiz = generate_quiz(paragraphs, categories, topics, questions_total=10)
             st.session_state.quiz = quiz
             st.session_state.current_index = 0
             st.session_state.score = 0
@@ -239,7 +221,7 @@ def main():
             else:
                 st.balloons()
                 st.subheader("🏁 Quiz abgeschlossen!")
-                st.write(f"**Gesamtscore: {st.session_state.score}/{len(quiz)}**")
+                st.write(f"**Gesamtscore: {st.session_state.score}/{len(quiz)} ({round((st.session_state.score/len(quiz))*100)}%)**")
 
                 st.markdown("### 📊 Kategorie-Statistik")
                 for cat, stats in st.session_state.stats.items():
