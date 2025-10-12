@@ -49,9 +49,6 @@ def extract_toc_from_docx(file_stream):
 # 📑 Abbildungen / Tabellen / Anhänge
 # -------------------------------------------------
 def extract_elements_from_pdf(file_stream):
-    """
-    Erkennt Abbildungen, Tabellen, Anhänge, Anlagen, Appendices.
-    """
     reader = PdfReader(file_stream)
     elements = []
     pattern = re.compile(
@@ -95,12 +92,10 @@ def extract_elements_from_pdf(file_stream):
 # -------------------------------------------------
 # 🔀 Antwortoptionen
 # -------------------------------------------------
-def build_choices_from_toc(correct_entry, toc_list, n_choices=4, show_titles=False, include_page=True):
+def build_choices_from_toc(correct_entry, toc_list, n_choices=4, include_page=True):
     def fmt(e):
         num = e.get("chapter_num", "")
         page = e.get("printed_page", "")
-        if show_titles:
-            return f"Kapitel {num} {e['chapter_title']} – Seite {page}"
         if include_page:
             return f"Kapitel {num} – Seite {page}"
         return f"Kapitel {num}"
@@ -113,67 +108,66 @@ def build_choices_from_toc(correct_entry, toc_list, n_choices=4, show_titles=Fal
     return choices, correct
 
 # -------------------------------------------------
-# 🧠 Professionelle Fragen (Kapitel, Abb., Tab., Anhang)
+# 🧠 Professionelle Fragen (inhaltlich)
 # -------------------------------------------------
 def generate_professional_question(toc_list, elements, category):
-    q_types = ["kapitel", "abbildung", "tabelle", "anhang"]
+    q_types = ["kapitel", "abbildung", "anhang"]
     q_type = random.choice(q_types if elements else ["kapitel"])
 
     # --- Kapitel / Seite ---
     if q_type == "kapitel":
         e = random.choice(toc_list)
         stems = [
-            "Die Bewertung von Risiken wurde wo erwähnt?",
-            "Das methodische Vorgehen wurde wo beschrieben?",
-            "Die Analyse der Ergebnisse findet sich wo?",
-            "Wo wurde die Szenarioanalyse erläutert?",
-            "Die Entscheidungsgrundlage wurde wo dargestellt?"
+            "Die Berechnung der Prozesskosten wurde wo beschrieben?",
+            "Die Bewertung von Risiken wurde wo erläutert?",
+            "Die Durchführung der FMEA ist wo dokumentiert?",
+            "Die Szenarioanalyse ist in welchem Abschnitt dargestellt?",
+            "Die Entscheidungsfindung wurde wo erklärt?"
         ]
         question = random.choice(stems)
-        choices, correct = build_choices_from_toc(e, toc_list, n_choices=4, show_titles=False, include_page=True)
+        choices, correct = build_choices_from_toc(e, toc_list, n_choices=4, include_page=True)
         return {"question": question, "choices": choices, "answer": correct, "category": category}
 
-    # --- Abbildungen / Tabellen / Anhänge ---
-    subset = [x for x in elements if x["type"].lower() == q_type]
+    # --- Abbildungen ---
+    if q_type == "abbildung":
+        subset = [x for x in elements if x["type"].lower() == "abbildung"]
+        if not subset:
+            return generate_professional_question(toc_list, elements, category)
+        e = random.choice(subset)
+        question = random.choice([
+            f"Die grafische Darstellung zur „{e['title']}“ befindet sich wo?",
+            f"In welchem Kapitel oder Anhang wird die Abbildung zur „{e['title']}“ gezeigt?"
+        ])
+        correct = f"Abbildung {e['label']}"
+        distract = [f"Kapitel {random.choice(toc_list)['chapter_num']}" for _ in range(3)]
+        choices = [correct] + distract
+        random.shuffle(choices)
+        return {"question": question, "choices": choices, "answer": correct, "category": category}
+
+    # --- Anhänge ---
+    subset = [x for x in elements if x["type"].lower() == "anhang"]
     if not subset:
         return generate_professional_question(toc_list, elements, category)
     e = random.choice(subset)
-    templates = {
-        "abbildung": [
-            f"In welcher Abbildung wird „{e['title']}“ gezeigt?",
-            f"Die grafische Darstellung „{e['title']}“ findet sich in welcher Abbildung?"
-        ],
-        "tabelle": [
-            f"Die Ergebnisse zu „{e['title']}“ sind in welcher Tabelle aufgeführt?",
-            f"Wo ist „{e['title']}“ tabellarisch dargestellt?"
-        ],
-        "anhang": [
-            f"In welchem Anhang werden „{e['title']}“ beschrieben?",
-            f"Die Detailauswertung „{e['title']}“ befindet sich in welchem Anhang?",
-            f"Die ergänzenden Dokumente zu „{e['title']}“ sind wo abgelegt?"
-        ]
-    }
-    question = random.choice(templates[q_type])
+    question = random.choice([
+        f"Die Tabelle oder Berechnung zu „{e['title']}“ ist wo enthalten?",
+        f"Die Auswertung zu „{e['title']}“ wurde wo abgelegt?",
+        f"Die Berechnungsergebnisse zu „{e['title']}“ sind wo dokumentiert?"
+    ])
 
-    if q_type == "anhang":
-        labels = sorted(list({x["label"] for x in subset if x["label"]}))
-        distract = []
-        if labels:
-            idx = labels.index(e["label"]) if e["label"] in labels else 0
-            for offset in [-2, -1, 1, 2]:
-                if 0 <= idx + offset < len(labels):
-                    distract.append(f"Anhang {labels[idx + offset]}")
-        distract = distract[:3]
-        correct = f"Anhang {e['label']}"
-        choices = [correct] + distract
-        random.shuffle(choices)
-    else:
-        distract = [f"{x['type']} {x['label']}" for x in subset if x is not e]
-        random.shuffle(distract)
-        distract = distract[:3]
-        correct = f"{e['type']} {e['label']}"
-        choices = [correct] + distract
-        random.shuffle(choices)
+    # plausible Ablenker
+    labels = sorted(list({x["label"] for x in subset if x["label"]}))
+    distract = []
+    if labels:
+        idx = labels.index(e["label"]) if e["label"] in labels else 0
+        for offset in [-2, -1, 1, 2]:
+            if 0 <= idx + offset < len(labels):
+                distract.append(f"Anhang {labels[idx + offset]}")
+    distract += [f"Kapitel {random.choice(toc_list)['chapter_num']}" for _ in range(2)]
+    distract = distract[:3]
+    correct = f"Anhang {e['label']}"
+    choices = [correct] + distract
+    random.shuffle(choices)
 
     return {"question": question, "choices": choices, "answer": correct, "category": category}
 
@@ -193,12 +187,12 @@ def generate_full_quiz(toc_list, elements, categories, questions_total=10):
 # 🎮 Streamlit-App
 # -------------------------------------------------
 def main():
-    st.set_page_config(page_title="Projektarbeit-Navigationsquiz", layout="centered")
-    st.title("🧭 Navigations- & Struktur-Quiz zur Projektarbeit")
-    st.caption("Teste dein Strukturwissen: Kapitel, Abbildungen, Tabellen, Anhänge.")
+    st.set_page_config(page_title="Projektarbeit Struktur-Quiz", layout="centered")
+    st.title("📘 Struktur- & Navigationsquiz zur Projektarbeit")
+    st.caption("Trainiere dein Verständnis – finde sofort, wo Inhalte, Berechnungen und Auswertungen stehen.")
 
     uploaded = st.file_uploader("📄 Lade deine Projektarbeit (PDF oder DOCX)", type=["pdf", "docx"])
-    cats = ["Kapitel", "Strukturwissen", "Abbildungen", "Tabellen", "Anhänge"]
+    cats = ["Kapitel", "Strukturwissen", "Abbildungen", "Anhänge"]
 
     if uploaded:
         ext = uploaded.name.lower().split(".")[-1]
@@ -211,12 +205,12 @@ def main():
         elif ext == "docx":
             toc = extract_toc_from_docx(BytesIO(data))
 
-        st.success(f"✅ {len(toc)} Kapitel, {len(elements)} Sonder-Elemente erkannt.")
+        st.success(f"✅ {len(toc)} Kapitel und {len(elements)} Elemente erkannt.")
         with st.expander("📜 Inhaltsverzeichnis"):
             for e in toc:
-                st.write(f"- Kapitel {e.get('chapter_num', '')} {e['chapter_title']} (Seite {e['printed_page']})")
+                st.write(f"- Kapitel {e.get('chapter_num','')} {e['chapter_title']} (Seite {e['printed_page']})")
         if elements:
-            with st.expander("🧩 Abbildungen / Tabellen / Anhänge"):
+            with st.expander("📊 Abbildungen / Anhänge"):
                 for el in elements:
                     st.write(f"- {el['type']} {el['label']}: {el['title']} (Seite {el['page']})")
 
@@ -232,7 +226,7 @@ def main():
         qlist = st.session_state.quiz
         i = st.session_state.index
         q = qlist[i]
-        st.markdown(f"### Frage {i + 1} ({q['category']})")
+        st.markdown(f"### Frage {i+1} ({q['category']})")
         st.write(q["question"])
         choice = st.radio("Antwort auswählen:", q["choices"], key=f"q{i}")
 
