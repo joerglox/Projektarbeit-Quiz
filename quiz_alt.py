@@ -18,7 +18,7 @@ if not openai.api_key:
 # -----------------------------
 # DOCX einlesen
 # -----------------------------
-def load_paragraphs_from_file(file, min_length=50):
+def load_paragraphs_from_file(file, min_length=30):
     """Lädt Absätze aus einer DOCX-Datei, filtert leere und zu kurze Passagen."""
     doc = Document(file)
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
@@ -27,7 +27,7 @@ def load_paragraphs_from_file(file, min_length=50):
 # -----------------------------
 # Absatz splitten
 # -----------------------------
-def split_paragraph(paragraph, max_length=400):
+def split_paragraph(paragraph, max_length=300):
     words = paragraph.split()
     parts, current = [], ""
     for word in words:
@@ -72,7 +72,7 @@ def shuffle_choices(q):
 def generate_question_gpt(paragraph, category, methods_used, retries=3):
     """Erstellt eine anspruchsvolle Prüfungsfrage auf Basis des Absatzes."""
     prompt = f"""
-Ich muss mich auf die Abschlusspräsentation und die anschießende Verteidigung meiner Arbeit vorbereiten. Ich möchte geprüft werden ob ich den Inhalt meiner Projektarbeit kenne und weiß wo in meiner Projektarbeit der entsprechende Text, die Abbildung oder Formel wiederzufinden ist. Erstelle eine hochwertige Frage auf Basis des folgenden Textes:
+Du bist ein erfahrener Prüfer im Fachgespräch. Erstelle eine hochwertige Frage auf Basis des folgenden Textes:
 
 Kategorie: {category}
 Absatz:
@@ -81,10 +81,12 @@ Absatz:
 Verwendete Methoden in der Arbeit: {', '.join(methods_used)}
 
 Die Frage soll prüfen:
-- das die Projektarbeit verstanden und selbst durchgeführt wurde
-- Auf welcher Seite, in welchem Kapitel oder Anhang der entsprechende Text bzw. Inhalt behandelt worden ist
-- wo die entsprechende Berechnung, die entsprechende Abbildung, Tabelle oder Grafik wiederzufinden ist.
-
+- Verständnis der Projektarbeit
+- Warum Methoden eingesetzt wurden
+- Funktionsweise der Methoden
+- Alternative Methoden (mindestens 1 Frage pro Runde)
+- Auswirkungen von Änderungen
+- Fach-, Methoden-, Analyse- und strategische Kompetenz
 
 Antwort im JSON-Format:
 {{
@@ -127,7 +129,7 @@ def generate_quiz(paragraphs, categories, methods_used, questions_total=10):
     while len(quiz) < questions_total:
         category = random.choice(categories)
         paragraph = random.choice(paragraphs)
-        parts = split_paragraph(paragraph, max_length=400)
+        parts = split_paragraph(paragraph, max_length=350)
 
         for part in parts:
             q = generate_question_gpt(part, category, methods_used)
