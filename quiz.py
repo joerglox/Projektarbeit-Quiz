@@ -46,7 +46,7 @@ def extract_toc_from_docx(file_stream):
     return toc_entries
 
 # -------------------------------------------------
-# 📑 Abbildungen / Tabellen / Anhänge
+# 📑 Abbildungen / Tabellen / Anhänge aus PDF
 # -------------------------------------------------
 def extract_elements_from_pdf(file_stream):
     reader = PdfReader(file_stream)
@@ -78,7 +78,6 @@ def extract_elements_from_pdf(file_stream):
                     "title": title,
                     "page": page_num + 1
                 })
-
     seen = set()
     cleaned = []
     for e in elements:
@@ -86,11 +85,11 @@ def extract_elements_from_pdf(file_stream):
         if key not in seen:
             cleaned.append(e)
             seen.add(key)
-    cleaned.sort(key=lambda x: (x["type"], x.get("label", ""), x.get("page", 9999)))
+    cleaned.sort(key=lambda x: (x["type"], x.get("page", 9999)))
     return cleaned
 
 # -------------------------------------------------
-# 🔀 Antwortoptionen
+# 🔀 Hilfsfunktionen
 # -------------------------------------------------
 def build_choices_from_toc(correct_entry, toc_list, n_choices=4, include_page=True):
     def fmt(e):
@@ -99,7 +98,6 @@ def build_choices_from_toc(correct_entry, toc_list, n_choices=4, include_page=Tr
         if include_page:
             return f"Kapitel {num} – Seite {page}"
         return f"Kapitel {num}"
-
     correct = fmt(correct_entry)
     near = sorted(toc_list, key=lambda x: abs(x["printed_page"] - correct_entry["printed_page"]))
     distract = [fmt(e) for e in near if e is not correct_entry][:n_choices - 1]
@@ -107,14 +105,24 @@ def build_choices_from_toc(correct_entry, toc_list, n_choices=4, include_page=Tr
     random.shuffle(choices)
     return choices, correct
 
+def random_annex_choices(elements, toc_list):
+    """Mische plausible Anhang- und Kapitelantworten"""
+    annexes = [e for e in elements if e["type"].lower() == "anhang"]
+    choices = []
+    if annexes:
+        choices += [f"Anhang {random.choice(annexes)['label']}" for _ in range(2)]
+    choices += [f"Kapitel {random.choice(toc_list)['chapter_num']}" for _ in range(2)]
+    random.shuffle(choices)
+    return list(dict.fromkeys(choices))[:4]
+
 # -------------------------------------------------
-# 🧠 Professionelle Fragen (inhaltlich)
+# 🧠 Professionelle Fragen (Kapitel / Abbildung / Tabelle / Anhang)
 # -------------------------------------------------
 def generate_professional_question(toc_list, elements, category):
-    q_types = ["kapitel", "abbildung", "anhang"]
+    q_types = ["kapitel", "abbildung", "tabelle", "anhang"]
     q_type = random.choice(q_types if elements else ["kapitel"])
 
-    # --- Kapitel / Seite ---
+    # --- Kapitel-basierte Frage ---
     if q_type == "kapitel":
         e = random.choice(toc_list)
         stems = [
@@ -125,23 +133,25 @@ def generate_professional_question(toc_list, elements, category):
             "Die Entscheidungsfindung wurde wo erklärt?"
         ]
         question = random.choice(stems)
-        choices, correct = build_choices_from_toc(e, toc_list, n_choices=4, include_page=True)
+        choices, correct = build_choices_from_toc(e, toc_list)
         return {"question": question, "choices": choices, "answer": correct, "category": category}
 
-    # --- Abbildungen ---
-    if q_type == "abbildung":
-        subset = [x for x in elements if x["type"].lower() == "abbildung"]
+    # --- Abbildungen & Tabellen (fragen nach Ort, nicht Nummer) ---
+    if q_type in ["abbildung", "tabelle"]:
+        subset = [x for x in elements if x["type"].lower() == q_type]
         if not subset:
             return generate_professional_question(toc_list, elements, category)
         e = random.choice(subset)
+        term = "grafische Darstellung" if q_type == "abbildung" else "tabellarische Berechnung"
         question = random.choice([
-            f"Die grafische Darstellung zur „{e['title']}“ befindet sich wo?",
-            f"In welchem Kapitel oder Anhang wird die Abbildung zur „{e['title']}“ gezeigt?"
+            f"Die {term} zu „{e['title']}“ befindet sich in welchem Kapitel oder Anhang?",
+            f"In welchem Abschnitt oder Anhang wird die {term} „{e['title']}“ gezeigt?"
         ])
-        correct = f"Abbildung {e['label']}"
-        distract = [f"Kapitel {random.choice(toc_list)['chapter_num']}" for _ in range(3)]
-        choices = [correct] + distract
-        random.shuffle(choices)
+        correct_entry = random.choice(toc_list)
+        correct = f"Kapitel {correct_entry['chapter_num']} – Seite {correct_entry['printed_page']}"
+        choices = random_annex_choices(elements, toc_list)
+        if correct not in choices:
+            choices[random.randint(0, len(choices)-1)] = correct
         return {"question": question, "choices": choices, "answer": correct, "category": category}
 
     # --- Anhänge ---
@@ -150,25 +160,13 @@ def generate_professional_question(toc_list, elements, category):
         return generate_professional_question(toc_list, elements, category)
     e = random.choice(subset)
     question = random.choice([
-        f"Die Tabelle oder Berechnung zu „{e['title']}“ ist wo enthalten?",
-        f"Die Auswertung zu „{e['title']}“ wurde wo abgelegt?",
-        f"Die Berechnungsergebnisse zu „{e['title']}“ sind wo dokumentiert?"
+        f"Die Berechnungen oder Detailauswertungen zu „{e['title']}“ wurden wo abgelegt?",
+        f"Die ergänzenden Unterlagen zu „{e['title']}“ sind in welchem Kapitel oder Anhang enthalten?"
     ])
-
-    # plausible Ablenker
-    labels = sorted(list({x["label"] for x in subset if x["label"]}))
-    distract = []
-    if labels:
-        idx = labels.index(e["label"]) if e["label"] in labels else 0
-        for offset in [-2, -1, 1, 2]:
-            if 0 <= idx + offset < len(labels):
-                distract.append(f"Anhang {labels[idx + offset]}")
-    distract += [f"Kapitel {random.choice(toc_list)['chapter_num']}" for _ in range(2)]
-    distract = distract[:3]
     correct = f"Anhang {e['label']}"
-    choices = [correct] + distract
-    random.shuffle(choices)
-
+    choices = random_annex_choices(elements, toc_list)
+    if correct not in choices:
+        choices[random.randint(0, len(choices)-1)] = correct
     return {"question": question, "choices": choices, "answer": correct, "category": category}
 
 # -------------------------------------------------
@@ -189,7 +187,7 @@ def generate_full_quiz(toc_list, elements, categories, questions_total=10):
 def main():
     st.set_page_config(page_title="Projektarbeit Struktur-Quiz", layout="centered")
     st.title("📘 Struktur- & Navigationsquiz zur Projektarbeit")
-    st.caption("Trainiere dein Verständnis – finde sofort, wo Inhalte, Berechnungen und Auswertungen stehen.")
+    st.caption("Trainiere dein Verständnis – finde Kapitel oder Anhänge zu Berechnungen, Darstellungen und Auswertungen.")
 
     uploaded = st.file_uploader("📄 Lade deine Projektarbeit (PDF oder DOCX)", type=["pdf", "docx"])
     cats = ["Kapitel", "Strukturwissen", "Abbildungen", "Anhänge"]
@@ -208,9 +206,9 @@ def main():
         st.success(f"✅ {len(toc)} Kapitel und {len(elements)} Elemente erkannt.")
         with st.expander("📜 Inhaltsverzeichnis"):
             for e in toc:
-                st.write(f"- Kapitel {e.get('chapter_num','')} {e['chapter_title']} (Seite {e['printed_page']})")
+                st.write(f"- Kapitel {e['chapter_num']} {e['chapter_title']} (Seite {e['printed_page']})")
         if elements:
-            with st.expander("📊 Abbildungen / Anhänge"):
+            with st.expander("🧩 Erkannte Elemente"):
                 for el in elements:
                     st.write(f"- {el['type']} {el['label']}: {el['title']} (Seite {el['page']})")
 
